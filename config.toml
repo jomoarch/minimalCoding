@@ -1,0 +1,26 @@
+base = "."
+
+[compiler]
+source = "src/s.cpp"
+output = "bin/s.exe"
+output_probe = "bin/s.probe.exe"
+args = ["g++", "-std=c++17", "-O2", "-Wall", "-Wextra"]
+force_rebuild = false
+
+[inject]
+enabled = true
+header = "include/inject/probe.h"
+
+[runner]
+work_dir = "work"
+time_limit_ms = 1000
+memory_limit_mb = 256
+status_line = true
+status_interval_ms = 100
+
+[io]
+single_input = "in.txt"
+single_output = "out.txt"
+merge_stderr = false
+print_input = false
+colorize_output = true
