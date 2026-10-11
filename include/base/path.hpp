@@ -2,6 +2,7 @@
 #define PATH_HPP
 
 #include <filesystem>
+#include <string>
 
 namespace coding {
 
@@ -12,6 +13,8 @@ compress_path(const std::filesystem::path &p, std::error_code &ec,
 [[nodiscard]] std::filesystem::path
 compress_path(const std::filesystem::path &p, bool resolve_symlinks = false,
               bool make_absolute = false);
+
+[[nodiscard]] std::string show_path(const std::filesystem::path &p);
 
 } // namespace coding
 

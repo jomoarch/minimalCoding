@@ -5,6 +5,7 @@
 #include "app/interactive_ui.hpp"
 #include "process/runner_single.hpp"
 #include "base/color.hpp"
+#include "base/path.hpp"
 #include "base/text.hpp"
 
 #include <windows.h>
@@ -52,7 +53,7 @@ bool need_probe_header(const AppConfig &cfg, std::string &error) {
 
   std::error_code ec;
   if (!std::filesystem::exists(cfg.inject_header, ec)) {
-    error = "injection header not found: " + cfg.inject_header.string() +
+    error = "injection header not found: " + show_path(cfg.inject_header) +
             " (set [inject].header, or [inject].enabled = false)";
     return false;
   }
@@ -92,7 +93,7 @@ BuildResult build_step(const AppConfig &cfg, BuildTarget target) {
 void print_build_line(const std::filesystem::path &exe, const BuildResult &s) {
   color::Scope green(std::cout, {color::Code::Green, color::Code::Bold});
   if (s.rebuilt)
-    std::cout << "[build] built -> " << exe.string() << '\n';
+    std::cout << "[build] built -> " << show_path(exe) << '\n';
   else
     std::cout << "[build] up-to-date (" << exe.filename().string() << ")\n";
 }

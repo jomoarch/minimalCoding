@@ -33,9 +33,7 @@ struct AppConfig {
   int status_interval_ms{100};
 
   // io
-  std::filesystem::path input_dir;
   std::filesystem::path single_input;
-  std::filesystem::path output_dir;
   std::filesystem::path single_output;
   int merge_stderr{-1};
   bool print_input{false};

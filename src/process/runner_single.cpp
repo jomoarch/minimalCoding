@@ -1,5 +1,7 @@
 #include "process/runner_single.hpp"
 
+#include "process/accounting.hpp"
+
 #include "base/handle.hpp"
 #include "base/win_error.hpp"
 #include "base/color.hpp"
@@ -490,37 +492,7 @@ SingleRunResult run_single(const SingleRunOption &opts) {
         "the program produced unframed output; it was probably built without "
         "the injected header (rebuild with --force)";
 
-  const auto t1 = std::chrono::steady_clock::now();
-  out.result.wall_time =
-      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
-
-  FILETIME c, e, k, u;
-  if (GetProcessTimes(pi.hProcess, &c, &e, &k, &u)) {
-    ULARGE_INTEGER ku{}, uu{};
-    ku.LowPart = k.dwLowDateTime;
-    ku.HighPart = k.dwHighDateTime;
-    uu.LowPart = u.dwLowDateTime;
-    uu.HighPart = u.dwHighDateTime;
-    out.result.cpu_time =
-        std::chrono::milliseconds((ku.QuadPart + uu.QuadPart) / 10000ULL);
-  }
-
-  JOBOBJECT_EXTENDED_LIMIT_INFORMATION jinfo{};
-  if (QueryInformationJobObject(hJob.get(), JobObjectExtendedLimitInformation,
-                                &jinfo, sizeof(jinfo), nullptr)) {
-    out.result.memory_bytes = static_cast<std::size_t>(jinfo.PeakJobMemoryUsed);
-  }
-
-  DWORD exit_code = 0;
-  GetExitCodeProcess(pi.hProcess, &exit_code);
-
-  if (exit_code == 0) {
-    out.result.status = RunnerStatus::Success;
-    out.result.message = "Success";
-  } else {
-    out.result.status = RunnerStatus::RuntimeError;
-    out.result.message = "Exit code: " + std::to_string(exit_code);
-  }
+  fill_accounting(out.result, pi.hProcess, hJob.get(), t0);
 
   out.captured = std::move(captured);
   return out;

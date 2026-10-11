@@ -1,15 +1,15 @@
 base = "."
 
 [compiler]
-source = "src/s.cpp"
-output = "bin/s.exe"
-output_probe = "bin/s.probe.exe"
+source = "src/main.cpp"
+output = "coding/build/main.exe"
+output_probe = "coding/build/main.probe.exe"
 args = ["g++", "-std=c++17", "-O2", "-Wall", "-Wextra"]
 force_rebuild = false
 
 [inject]
 enabled = true
-header = "include/inject/probe.h"
+header = "inject/probe.h"
 
 [runner]
 work_dir = "work"
@@ -19,8 +19,8 @@ status_line = true
 status_interval_ms = 100
 
 [io]
-single_input = "in.txt"
-single_output = "out.txt"
+single_input = "input"
+single_output = "output"
 merge_stderr = false
 print_input = false
 colorize_output = true

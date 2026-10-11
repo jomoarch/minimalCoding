@@ -1,6 +1,7 @@
 #include "app/prompt.hpp"
 
 #include "base/color.hpp"
+#include "base/path.hpp"
 #include "base/text.hpp"
 
 #include <windows.h>
@@ -59,7 +60,7 @@ bool ask_save(const std::filesystem::path &target, std::string_view what) {
       GetConsoleMode(hIn, &mode))
     FlushConsoleInputBuffer(hIn);
 
-  std::cout << "[save] Save " << what << " to " << target.string()
+  std::cout << "[save] Save " << what << " to " << show_path(target)
             << " ? [y/N] " << std::flush;
 
   std::string line;

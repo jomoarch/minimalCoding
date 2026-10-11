@@ -1,6 +1,7 @@
 #include "app/stale_exe.hpp"
 
 #include "base/hash.hpp"
+#include "base/path.hpp"
 #include "base/win_error.hpp"
 
 #include <cstdio>
@@ -61,15 +62,15 @@ Outcome clear(const fs::path &exe, bool park, std::string &note) {
   const fs::path dir = exe.parent_path() / ".trash";
 
   if (!park) {
-    note = "cannot delete " + exe.string() + ": " + reason;
+    note = "cannot delete " + show_path(exe) + ": " + reason;
     return Outcome::Blocked;
   }
 
   ec.clear();
   fs::create_directories(dir, ec);
   if (ec) {
-    note = "cannot delete " + exe.string() + ": " + reason +
-           ", and cannot create " + dir.string() + ": " +
+    note = "cannot delete " + show_path(exe) + ": " + reason +
+           ", and cannot create " + show_path(dir) + ": " +
            win::error_string(static_cast<DWORD>(ec.value()));
     return Outcome::Blocked;
   }
@@ -83,14 +84,14 @@ Outcome clear(const fs::path &exe, bool park, std::string &note) {
   ec.clear();
   fs::rename(exe, target, ec);
   if (ec) {
-    note = "cannot delete " + exe.string() + ": " + reason +
-           ", and cannot move it to " + target.string() + ": " +
+    note = "cannot delete " + show_path(exe) + ": " + reason +
+           ", and cannot move it to " + show_path(target) + ": " +
            win::error_string(static_cast<DWORD>(ec.value()));
     return Outcome::Blocked;
   }
 
-  note = "cannot delete " + exe.string() + ": " + reason + "; moved it to " +
-         target.string();
+  note = "cannot delete " + show_path(exe) + ": " + reason + "; moved it to " +
+         show_path(target);
   return Outcome::Parked;
 }
 

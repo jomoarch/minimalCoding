@@ -2,6 +2,7 @@
 #include "app/prompt.hpp"
 #include "app/stale_exe.hpp"
 #include "base/color.hpp"
+#include "base/path.hpp"
 #include "process/compiler.hpp"
 
 #include <filesystem>
@@ -58,7 +59,7 @@ BuildResult ensure_built(const BuildOption &opts) {
     std::cout << color::err("[build] ", note, "\n") << std::flush;
     if (prompt::ask_yes_no(
             "Move it into " +
-            (opts.output_path.parent_path() / ".trash").string() +
+            show_path(opts.output_path.parent_path() / ".trash") +
             " under its SHA-256 and carry on?")) {
       cleared = stale_exe::clear(opts.output_path, true, note);
       if (cleared == stale_exe::Outcome::Parked)

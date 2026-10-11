@@ -50,4 +50,8 @@ std::filesystem::path compress_path(const std::filesystem::path &p,
   return compress_path(p, ec, resolve_symlinks, make_absolute);
 }
 
+std::string show_path(const std::filesystem::path &p) {
+  return compress_path(p).string();
+}
+
 } // namespace coding

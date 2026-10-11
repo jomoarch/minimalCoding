@@ -321,8 +321,6 @@ ConfigResult load_config(const std::filesystem::path &path) {
 
   // [io]
   read_section(tbl, "io", [&](const toml::table &t) {
-    read_field(t, "input_dir", c.input_dir);
-    read_field(t, "output_dir", c.output_dir);
     read_field(t, "single_input", c.single_input);
     read_field(t, "single_output", c.single_output);
     read_field_as<bool>(t, "merge_stderr", c.merge_stderr,
@@ -343,8 +341,7 @@ ConfigResult load_config(const std::filesystem::path &path) {
   c.base = compress_path(base, false, true);
 
   resolve_all(base, c.source_path, c.exe_path, c.exe_path_probe, c.work_dir,
-              c.input_dir, c.output_dir, c.single_input, c.single_output,
-              c.inject_header);
+              c.single_input, c.single_output, c.inject_header);
 
   if (c.exe_path_probe.empty() && !c.exe_path.empty())
     c.exe_path_probe = derive_probe_path(c.exe_path);

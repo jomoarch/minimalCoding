@@ -17,6 +17,7 @@ set(CORE_SOURCES
   src/base/terminal.cpp
   src/base/path.cpp
   src/io/config.cpp
+  src/process/accounting.cpp
   src/process/compiler.cpp
   src/process/runner_single.cpp
   src/monitor/monitor.cpp
