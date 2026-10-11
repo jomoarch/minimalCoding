@@ -5,12 +5,16 @@
 #include "base/color.hpp"
 #include "io/config.hpp"
 
+#include <windows.h>
+
 #include <iostream>
 
 namespace coding {
 namespace app {
 
 namespace {
+
+void use_utf8_console() noexcept { ::SetConsoleOutputCP(CP_UTF8); }
 
 bool load(AppConfig &out) {
   const ConfigResult r = load_config("config.toml");
@@ -25,6 +29,8 @@ bool load(AppConfig &out) {
 } // namespace
 
 int run_single() {
+  use_utf8_console();
+  color::install();
   AppConfig cfg;
   if (!load(cfg))
     return 2;
@@ -34,6 +40,8 @@ int run_single() {
 }
 
 int run_interactive() {
+  use_utf8_console();
+  color::install();
   AppConfig cfg;
   if (!load(cfg))
     return 2;
