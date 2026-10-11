@@ -199,30 +199,67 @@ void pump_tagged(HANDLE hFramed, HANDLE hRawErr, TagSplitter &splitter,
   }
 }
 
-} // namespace
+struct PipeSet {
+  HandleGuard out_read, out_write;
+  HandleGuard err_read, err_write;
+  HandleGuard in_read, in_write;
+  HANDLE child_stdin{INVALID_HANDLE_VALUE};
+  HANDLE console_in{INVALID_HANDLE_VALUE};
+  bool stdin_is_console{false};
+  DWORD saved_console_mode{0};
+  bool console_mode_saved{false};
+  void close_parent_ends() noexcept {
+    out_write.reset();
+    err_write.reset();
+    in_read.reset();
+  }
+  ~PipeSet() {
+    if (console_mode_saved && console_in != INVALID_HANDLE_VALUE)
+      SetConsoleMode(console_in, saved_console_mode);
+  }
+};
 
-SingleRunResult run_single(const SingleRunOption &opts) {
-  SingleRunResult out;
-  out.result.status = RunnerStatus::SystemError;
+struct ChildProcess {
+  HandleGuard process;
+  HandleGuard thread;
+  std::chrono::steady_clock::time_point started;
+};
 
+struct OutputContext {
+  color::Style stdout_style{color::Code::Green};
+  color::Style stderr_style{color::Code::Red};
+  Sink sink;
+  std::string captured;
+  std::string raw_err;
+  std::unique_ptr<TagSplitter> splitter;
+  std::thread pump;
+  ~OutputContext() {
+    if (pump.joinable())
+      pump.join();
+  }
+};
+
+bool prepare_environment(const SingleRunOption &opts, SingleRunResult &out) {
   std::error_code ec;
   if (!std::filesystem::exists(opts.exe_path, ec)) {
     out.result.message = "Executable not found: " + opts.exe_path.string();
-    return out;
+    return false;
   }
-
   if (!opts.work_dir.empty()) {
     std::filesystem::create_directories(opts.work_dir, ec);
     if (ec) {
       out.result.message = "Failed to create work_dir: " + ec.message();
-      return out;
+      return false;
     }
   }
+  return true;
+}
 
+HandleGuard create_job(SingleRunResult &out) {
   HandleGuard hJob(CreateJobObjectW(nullptr, nullptr));
   if (!hJob.valid()) {
     out.result.message = "CreateJobObjectW failed: " + win::last_error_string();
-    return out;
+    return hJob;
   }
 
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
@@ -231,15 +268,20 @@ SingleRunResult run_single(const SingleRunOption &opts) {
                                &jeli, sizeof(jeli))) {
     out.result.message =
         "SetInformationJobObject failed: " + win::last_error_string();
-    return out;
+    hJob.reset();
+    return hJob;
   }
+  return hJob;
+}
 
+bool open_pipes(const SingleRunOption &opts, PipeSet &pipes,
+                SingleRunResult &out) {
   SECURITY_ATTRIBUTES sa{};
   sa.nLength = sizeof(sa);
   sa.bInheritHandle = TRUE;
 
   auto make_pipe = [&](HandleGuard &read_end, HandleGuard &write_end,
-                       const char *what) {
+                       const char *what) -> bool {
     HANDLE r = INVALID_HANDLE_VALUE;
     HANDLE w = INVALID_HANDLE_VALUE;
     if (!CreatePipe(&r, &w, &sa, 0)) {
@@ -253,32 +295,28 @@ SingleRunResult run_single(const SingleRunOption &opts) {
     return true;
   };
 
-  HandleGuard hOutRead;
-  HandleGuard hOutWrite;
-  HandleGuard hErrRead;
-  HandleGuard hErrWrite;
+  HandleGuard &hOutRead = pipes.out_read;
+  HandleGuard &hOutWrite = pipes.out_write;
+  HandleGuard &hErrRead = pipes.err_read;
+  HandleGuard &hErrWrite = pipes.err_write;
+  HandleGuard &hStdinRead = pipes.in_read;
+  HandleGuard &hStdinWrite = pipes.in_write;
+  HANDLE &hChildStdin = pipes.child_stdin;
+  HANDLE &hConsoleIn = pipes.console_in;
+  bool &stdin_is_console = pipes.stdin_is_console;
+  DWORD &saved_console_mode = pipes.saved_console_mode;
+  bool &console_mode_saved = pipes.console_mode_saved;
+
   if (!make_pipe(hOutRead, hOutWrite, "stdout"))
-    return out;
+    return false;
   if (!make_pipe(hErrRead, hErrWrite, "stderr"))
-    return out;
-
-  HandleGuard hStdinRead;
-  HandleGuard hStdinWrite;
-  HANDLE hChildStdin = INVALID_HANDLE_VALUE;
-  bool stdin_is_console = false;
-
-  HANDLE hConsoleIn = INVALID_HANDLE_VALUE;
-  std::thread stdin_forwarder;
-  std::atomic<bool> stdin_stop{false};
-
-  DWORD saved_console_mode = 0;
-  bool console_mode_saved = false;
+    return false;
 
   if (opts.stdin_from_console) {
     hConsoleIn = GetStdHandle(STD_INPUT_HANDLE);
     if (hConsoleIn == nullptr || hConsoleIn == INVALID_HANDLE_VALUE) {
       out.result.message = "No console stdin available";
-      return out;
+      return false;
     }
     DWORD mode = 0;
     stdin_is_console = GetConsoleMode(hConsoleIn, &mode) != FALSE;
@@ -288,15 +326,13 @@ SingleRunResult run_single(const SingleRunOption &opts) {
       console_mode_saved =
           SetConsoleMode(hConsoleIn, mode | ENABLE_ECHO_INPUT) != FALSE;
 
-      HANDLE r = INVALID_HANDLE_VALUE;
-      HANDLE w = INVALID_HANDLE_VALUE;
-      if (!CreatePipe(&r, &w, &sa, 0)) {
-        out.result.message =
-            "CreatePipe(stdin) failed: " + win::last_error_string();
-        return out;
-      }
-      hStdinRead.reset(r);
-      hStdinWrite.reset(w);
+      HandleGuard r, w;
+      if (!make_pipe(r, w, "stdin"))
+        return false;
+      hStdinRead = std::move(r);
+      hStdinWrite = std::move(w);
+      SetHandleInformation(hStdinRead.get(), HANDLE_FLAG_INHERIT,
+                           HANDLE_FLAG_INHERIT);
       SetHandleInformation(hStdinWrite.get(), HANDLE_FLAG_INHERIT, 0);
       hChildStdin = hStdinRead.get();
     } else {
@@ -305,19 +341,21 @@ SingleRunResult run_single(const SingleRunOption &opts) {
                            HANDLE_FLAG_INHERIT);
     }
   } else {
-    HANDLE r = INVALID_HANDLE_VALUE;
-    HANDLE w = INVALID_HANDLE_VALUE;
-    if (!CreatePipe(&r, &w, &sa, 0)) {
-      out.result.message =
-          "CreatePipe(stdin) failed: " + win::last_error_string();
-      return out;
-    }
-    hStdinRead.reset(r);
-    hStdinWrite.reset(w);
+    HandleGuard r, w;
+    if (!make_pipe(r, w, "stdin"))
+      return false;
+    hStdinRead = std::move(r);
+    hStdinWrite = std::move(w);
+    SetHandleInformation(hStdinRead.get(), HANDLE_FLAG_INHERIT,
+                         HANDLE_FLAG_INHERIT);
     SetHandleInformation(hStdinWrite.get(), HANDLE_FLAG_INHERIT, 0);
     hChildStdin = hStdinRead.get();
   }
+  return true;
+}
 
+bool spawn_child(const SingleRunOption &opts, PipeSet &pipes, HANDLE job,
+                 ChildProcess &child, SingleRunResult &out) {
   std::wstring cmd = L"\"" + opts.exe_path.wstring() + L"\"";
   std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
   cmdBuf.push_back(L'\0');
@@ -332,9 +370,9 @@ SingleRunResult run_single(const SingleRunOption &opts) {
   STARTUPINFOW si{};
   si.cb = sizeof(si);
   si.dwFlags = STARTF_USESTDHANDLES;
-  si.hStdInput = hChildStdin;
-  si.hStdOutput = hOutWrite.get();
-  si.hStdError = hErrWrite.get();
+  si.hStdInput = pipes.child_stdin;
+  si.hStdOutput = pipes.out_write.get();
+  si.hStdError = pipes.err_write.get();
 
   PROCESS_INFORMATION pi{};
   DWORD create_flags = CREATE_SUSPENDED | CREATE_NO_WINDOW;
@@ -342,63 +380,60 @@ SingleRunResult run_single(const SingleRunOption &opts) {
   if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE,
                       create_flags, nullptr, cwd, &si, &pi)) {
     out.result.message = "CreateProcessW failed: " + win::last_error_string();
-    return out;
+    return false;
   }
-  HandleGuard hProcess(pi.hProcess);
-  HandleGuard hThread(pi.hThread);
+  child.process.reset(pi.hProcess);
+  child.thread.reset(pi.hThread);
 
-  if (!AssignProcessToJobObject(hJob.get(), pi.hProcess)) {
+  if (!AssignProcessToJobObject(job, pi.hProcess)) {
     TerminateProcess(pi.hProcess, 1);
     WaitForSingleObject(pi.hProcess, INFINITE);
     out.result.message =
         "AssignProcessToJobObject failed: " + win::last_error_string();
-    return out;
+    return false;
   }
 
-  hOutWrite.reset();
-  hErrWrite.reset();
-  hStdinRead.reset();
-
-  const auto t0 = std::chrono::steady_clock::now();
+  pipes.close_parent_ends();
+  child.started = std::chrono::steady_clock::now();
   ResumeThread(pi.hThread);
 
-  const color::Style stdout_style({color::Code::Green});
-  const color::Style stderr_style({color::Code::Red});
+  return true;
+}
 
-  Sink sink;
-  sink.echo = opts.echo;
-  sink.colorize = opts.colorize_output;
-  sink.out_style = &stdout_style;
-  sink.err_style = &stderr_style;
-  sink.on_output = opts.on_output;
+void start_output_pump(const SingleRunOption &opts, const PipeSet &pipes,
+                       OutputContext &ctx) {
+  ctx.sink.echo = opts.echo;
+  ctx.sink.colorize = opts.colorize_output;
+  ctx.sink.out_style = &ctx.stdout_style;
+  ctx.sink.err_style = &ctx.stderr_style;
+  ctx.sink.on_output = opts.on_output;
 
-  if (opts.on_started)
-    opts.on_started(pi.hProcess, hJob.get());
+  if (opts.tagged_stream) {
+    ctx.splitter = std::make_unique<TagSplitter>(ctx.sink, &ctx.captured,
+                                                 opts.merge_stderr);
+    ctx.pump =
+        std::thread(pump_tagged, pipes.out_read.get(), pipes.err_read.get(),
+                    std::ref(*ctx.splitter), &ctx.raw_err);
+  } else {
+    ctx.pump =
+        std::thread(pump_both, pipes.out_read.get(), pipes.err_read.get(),
+                    std::cref(ctx.sink), &ctx.captured, opts.merge_stderr);
+  }
+}
 
-  std::string captured;
-  std::string raw_err;
-  TagSplitter splitter(sink, &captured, opts.merge_stderr);
-
-  std::thread pump;
-  if (opts.tagged_stream)
-    pump = std::thread(pump_tagged, hOutRead.get(), hErrRead.get(),
-                       std::ref(splitter), &raw_err);
-  else
-    pump = std::thread(pump_both, hOutRead.get(), hErrRead.get(),
-                       std::cref(sink), &captured, opts.merge_stderr);
-
-  if (opts.stdin_source && hStdinWrite.valid()) {
-
-    stdin_forwarder = std::thread([&]() {
+std::thread start_stdin_pump(const SingleRunOption &opts, PipeSet &pipes,
+                             std::atomic<bool> &stop) {
+  if (opts.stdin_source && pipes.in_write.valid()) {
+    return std::thread([&]() {
       std::vector<char> buf(4096);
-      while (!stdin_stop.load(std::memory_order_relaxed)) {
+      while (!stop.load(std::memory_order_relaxed)) {
         const std::size_t want = opts.stdin_source(buf.data(), buf.size());
         if (want == 0)
           break;
         std::size_t done = 0;
         while (done < want) {
           DWORD wrote = 0;
-          if (!WriteFile(hStdinWrite.get(), buf.data() + done,
+          if (!WriteFile(pipes.in_write.get(), buf.data() + done,
                          static_cast<DWORD>(want - done), &wrote, nullptr) ||
               wrote == 0)
             break;
@@ -407,94 +442,138 @@ SingleRunResult run_single(const SingleRunOption &opts) {
         if (done < want)
           break;
       }
-      hStdinWrite.reset();
+      pipes.in_write.reset();
     });
-  } else if (opts.stdin_from_console && stdin_is_console &&
-             hStdinWrite.valid()) {
-    stdin_forwarder = std::thread([&]() {
+  }
+
+  if (opts.stdin_from_console && pipes.stdin_is_console &&
+      pipes.in_write.valid()) {
+    return std::thread([&]() {
       std::vector<char> fbuf(4096);
       std::vector<char> batch;
-
       constexpr DWORD kIdleMs = 15;
       constexpr std::size_t kMaxBatch = 256 * 1024;
-
       bool closed = false;
-      while (!closed && !stdin_stop.load(std::memory_order_relaxed)) {
-        DWORD r = ::WaitForSingleObject(hConsoleIn, 50);
+      while (!closed && !stop.load(std::memory_order_relaxed)) {
+        const DWORD r = WaitForSingleObject(pipes.console_in, 50);
         if (r == WAIT_TIMEOUT)
           continue;
         if (r != WAIT_OBJECT_0)
           break;
-
         batch.clear();
         for (;;) {
           DWORD n = 0;
-          if (!::ReadFile(hConsoleIn, fbuf.data(),
-                          static_cast<DWORD>(fbuf.size()), &n, nullptr) ||
+          if (!ReadFile(pipes.console_in, fbuf.data(),
+                        static_cast<DWORD>(fbuf.size()), &n, nullptr) ||
               n == 0) {
             closed = true;
             break;
           }
           batch.insert(batch.end(), fbuf.begin(), fbuf.begin() + n);
-
           if (batch.size() >= kMaxBatch)
             break;
-          if (::WaitForSingleObject(hConsoleIn, kIdleMs) != WAIT_OBJECT_0)
+          if (WaitForSingleObject(pipes.console_in, kIdleMs) != WAIT_OBJECT_0)
             break;
         }
         if (batch.empty())
           continue;
-
         DWORD written = 0;
-        if (!::WriteFile(hStdinWrite.get(), batch.data(),
-                         static_cast<DWORD>(batch.size()), &written, nullptr) ||
+        if (!WriteFile(pipes.in_write.get(), batch.data(),
+                       static_cast<DWORD>(batch.size()), &written, nullptr) ||
             written == 0)
           break;
       }
-      hStdinWrite.reset();
+      pipes.in_write.reset();
     });
-  } else if (hStdinWrite.valid()) {
+  }
+
+  if (pipes.in_write.valid()) {
     std::size_t left = opts.input_text.size();
     const char *p = opts.input_text.data();
     while (left > 0) {
       DWORD written = 0;
       const DWORD chunk =
           static_cast<DWORD>(std::min<std::size_t>(left, 64 * 1024));
-      if (!WriteFile(hStdinWrite.get(), p, chunk, &written, nullptr) ||
+      if (!WriteFile(pipes.in_write.get(), p, chunk, &written, nullptr) ||
           written == 0)
         break;
       p += written;
       left -= written;
     }
-    hStdinWrite.reset();
+    pipes.in_write.reset();
   }
+  return {};
+}
 
-  WaitForSingleObject(pi.hProcess, INFINITE);
+void wait_for_child(const SingleRunOption &opts, HANDLE process, HANDLE job,
+                    std::chrono::steady_clock::time_point started) {
+  WaitForSingleObject(process, INFINITE);
+}
 
+void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
+                  OutputContext &ctx, std::thread &stdin_pump,
+                  std::atomic<bool> &stdin_stop, HANDLE process, HANDLE job,
+                  std::chrono::steady_clock::time_point started,
+                  SingleRunResult &out) {
   stdin_stop.store(true, std::memory_order_relaxed);
-  if (stdin_forwarder.joinable())
-    stdin_forwarder.join();
+  if (stdin_pump.joinable())
+    stdin_pump.join();
+  if (ctx.pump.joinable())
+    ctx.pump.join();
 
-  pump.join();
+  pipes.out_read.reset();
+  pipes.err_read.reset();
 
-  if (console_mode_saved && hConsoleIn != INVALID_HANDLE_VALUE)
-    SetConsoleMode(hConsoleIn, saved_console_mode);
+  if (opts.tagged_stream && !ctx.raw_err.empty() && opts.echo)
+    write_styled(opts.colorize_output, &ctx.stderr_style, ctx.raw_err.data(),
+                 ctx.raw_err.size());
 
-  hOutRead.reset();
-  hErrRead.reset();
-
-  if (opts.tagged_stream && !raw_err.empty() && opts.echo)
-    write_styled(opts.colorize_output, &stderr_style, raw_err.data(),
-                 raw_err.size());
-
-  if (opts.tagged_stream && splitter.bytes() > 0 && !splitter.saw_tag())
+  if (opts.tagged_stream && ctx.splitter && ctx.splitter->bytes() > 0 &&
+      !ctx.splitter->saw_tag())
     out.warning =
         "the program produced unframed output; it was probably built without "
         "the injected header (rebuild with --force)";
 
-  fill_accounting(out.result, pi.hProcess, hJob.get(), t0);
+  fill_accounting(out.result, process, job, started);
+}
 
-  out.captured = std::move(captured);
+} // namespace
+
+SingleRunResult run_single(const SingleRunOption &opts) {
+  SingleRunResult out;
+  out.result.status = RunnerStatus::SystemError;
+
+  if (!prepare_environment(opts, out))
+    return out;
+
+  HandleGuard hJob = create_job(out);
+  if (!hJob)
+    return out;
+
+  PipeSet pipes;
+  if (!open_pipes(opts, pipes, out))
+    return out;
+
+  ChildProcess child;
+  if (!spawn_child(opts, pipes, hJob.get(), child, out))
+    return out;
+
+  if (opts.on_started)
+    opts.on_started(child.process.get(), hJob.get());
+
+  OutputContext ctx;
+  start_output_pump(opts, pipes, ctx);
+
+  std::atomic<bool> stdin_stop{false};
+  std::thread stdin_pump = start_stdin_pump(opts, pipes, stdin_stop);
+
+  wait_for_child(opts, child.process.get(), hJob.get(), child.started);
+
+  finalize_run(opts, pipes, ctx, stdin_pump, stdin_stop, child.process.get(),
+               hJob.get(), child.started, out);
+
+  out.captured = std::move(ctx.captured);
   return out;
 }
+
 } // namespace coding
