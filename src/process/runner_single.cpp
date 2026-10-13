@@ -505,15 +505,39 @@ std::thread start_stdin_pump(const SingleRunOption &opts, PipeSet &pipes,
   return {};
 }
 
-void wait_for_child(const SingleRunOption &opts, HANDLE process, HANDLE job,
-                    std::chrono::steady_clock::time_point started) {
-  WaitForSingleObject(process, INFINITE);
+bool wait_for_child(const SingleRunOption &opts, HANDLE process, HANDLE job) {
+  if (opts.time_limit_ms.count() == 0) {
+    WaitForSingleObject(process, INFINITE);
+    return false;
+  }
+  const DWORD check_interval = 200;
+  while (true) {
+    DWORD ret = WaitForSingleObject(process, check_interval);
+    if (ret == WAIT_OBJECT_0)
+      return false;
+    FILETIME creation, exit, kernel, user;
+    if (GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
+      ULARGE_INTEGER k, u;
+      k.LowPart = kernel.dwLowDateTime;
+      k.HighPart = kernel.dwHighDateTime;
+      u.LowPart = user.dwLowDateTime;
+      u.HighPart = user.dwHighDateTime;
+      unsigned long long cpu_ms = (k.QuadPart + u.QuadPart) / 10000ULL;
+      if (cpu_ms >
+          static_cast<unsigned long long>(opts.time_limit_ms.count())) {
+        TerminateJobObject(job, 1);
+        WaitForSingleObject(process, 5000);
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
                   OutputContext &ctx, std::thread &stdin_pump,
                   std::atomic<bool> &stdin_stop, HANDLE process, HANDLE job,
-                  std::chrono::steady_clock::time_point started,
+                  std::chrono::steady_clock::time_point started, bool time_out,
                   SingleRunResult &out) {
   stdin_stop.store(true, std::memory_order_relaxed);
   if (stdin_pump.joinable())
@@ -534,7 +558,8 @@ void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
         "the program produced unframed output; it was probably built without "
         "the injected header (rebuild with --force)";
 
-  fill_accounting(out.result, process, job, started);
+  fill_accounting(out.result, process, job, started, opts.memory_limit_bytes,
+                  time_out);
 }
 
 } // namespace
@@ -567,10 +592,10 @@ SingleRunResult run_single(const SingleRunOption &opts) {
   std::atomic<bool> stdin_stop{false};
   std::thread stdin_pump = start_stdin_pump(opts, pipes, stdin_stop);
 
-  wait_for_child(opts, child.process.get(), hJob.get(), child.started);
+  const bool time_out = wait_for_child(opts, child.process.get(), hJob.get());
 
   finalize_run(opts, pipes, ctx, stdin_pump, stdin_stop, child.process.get(),
-               hJob.get(), child.started, out);
+               hJob.get(), child.started, time_out, out);
 
   out.captured = std::move(ctx.captured);
   return out;

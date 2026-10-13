@@ -142,11 +142,11 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run) {
     case RunnerStatus::Success:
       return color::ok("success");
     case RunnerStatus::TimeLimitExceeded:
-      return color::err("TLE");
+      return color::err("Time Limit Exceeded");
     case RunnerStatus::MemoryLimitExceeded:
-      return color::err("MLE");
+      return color::err("Memory Limit Exceeded");
     case RunnerStatus::RuntimeError:
-      return color::err("runtime error");
+      return color::err("Runtime Rrror");
     default:
       return color::warn(run.result.message);
     }
@@ -201,6 +201,8 @@ int run_interactive(const AppConfig &cfg) {
   opt.colorize_output = cfg.colorize_output;
   opt.tagged_stream = uses_probe_build(cfg);
   opt.merge_stderr = cfg.merge_stderr == 1;
+  opt.time_limit_ms = cfg.time_limit;
+  opt.memory_limit_bytes = cfg.memory_limit_bytes;
 
   SingleRunResult run;
   if (!cfg.status_line || !interactive::run(cfg, opt, run)) {
@@ -258,6 +260,8 @@ int run_single_file(const AppConfig &cfg) {
   opt.colorize_output = cfg.colorize_output;
   opt.tagged_stream = uses_probe_build(cfg);
   opt.merge_stderr = cfg.merge_stderr == 1;
+  opt.time_limit_ms = cfg.time_limit;
+  opt.memory_limit_bytes = cfg.memory_limit_bytes;
 
   return finish_single(cfg, run_single(opt));
 }

@@ -7,11 +7,15 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <chrono>
 namespace coding {
 
 struct SingleRunOption {
   std::filesystem::path exe_path;
   std::filesystem::path work_dir;
+
+  std::chrono::milliseconds time_limit_ms{0};
+  std::size_t memory_limit_bytes{0};
 
   bool stdin_from_console{false};
   std::string input_text;
