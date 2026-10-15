@@ -37,6 +37,7 @@ struct SingleRunResult {
   RunnerResult result;
   std::string captured;
   std::string warning;
+  std::string user_input;
 
   bool ok() const noexcept { return result.ok(); }
   explicit operator bool() const noexcept { return result.ok(); }

@@ -133,7 +133,8 @@ std::string format_memory(std::size_t bytes) {
   return oss.str();
 }
 
-int finish_single(const AppConfig &cfg, const SingleRunResult &run) {
+int finish_single(const AppConfig &cfg, const SingleRunResult &run,
+                  bool is_interactive) {
   if (!run.warning.empty())
     std::cerr << color::warn("[probe] ", run.warning) << "\n";
 
@@ -177,6 +178,22 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run) {
     }
   }
 
+  if (!is_interactive)
+    return run.result.status == RunnerStatus::Success ? 0 : 1;
+  if (run.user_input.empty()) {
+    std::cout << "[save] your input is empty, nothing saved\n";
+  } else if (prompt::ask_save(cfg.single_input, "input")) {
+    if (write_text(cfg.single_input, run.user_input)) {
+      std::cout << color::ok("[save] saved ", run.user_input.size(),
+                             " byte(s) -> ", cfg.single_input)
+                << "\n";
+    } else {
+      std::cerr << color::err("[save] Failed to write ", cfg.single_input)
+                << "\n";
+      return 2;
+    }
+  }
+
   return run.result.status == RunnerStatus::Success ? 0 : 1;
 }
 
@@ -209,7 +226,7 @@ int run_interactive(const AppConfig &cfg) {
     opt.stdin_from_console = true;
     run = run_single(opt);
   }
-  return finish_single(cfg, run);
+  return finish_single(cfg, run, true);
 }
 
 int run_single_file(const AppConfig &cfg) {
@@ -263,7 +280,7 @@ int run_single_file(const AppConfig &cfg) {
   opt.time_limit_ms = cfg.time_limit;
   opt.memory_limit_bytes = cfg.memory_limit_bytes;
 
-  return finish_single(cfg, run_single(opt));
+  return finish_single(cfg, run_single(opt), false);
 }
 
 } // namespace coding

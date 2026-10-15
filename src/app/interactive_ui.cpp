@@ -42,6 +42,8 @@ struct Shared {
   std::size_t input_at{0};
   bool eof{false};
 
+  std::string recorded_input;
+
   std::atomic<bool> stop{false};
   std::atomic<bool> done{false};
 
@@ -64,6 +66,10 @@ void queue_input(Shared &shared, std::string_view text) {
 void submit_line(line::Editor &editor, Shared &shared, bar::Bar &bar) {
   const std::string text = editor.buffer + "\n";
   queue_input(shared, text);
+  {
+    std::lock_guard<std::mutex> lock(shared.m);
+    shared.recorded_input += text;
+  }
   bar.commit_text(text);
   editor.clear();
   bar.set_input(editor.text(), editor.cursor);
@@ -166,7 +172,6 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
       if (key == term::Key::Resize) {
         bar.resize();
       } else if (key == term::Key::Paste) {
-
         submit_paste(clipboard::text(), editor, shared, bar);
       } else {
         const line::Outcome action = editor.feed(key, ch);
@@ -228,6 +233,10 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
     std::cerr << "[run] interrupted\n";
 
   out = std::move(result);
+  {
+    std::lock_guard<std::mutex> lock(shared.m);
+    out.user_input = std::move(shared.recorded_input);
+  }
   return true;
 }
 
