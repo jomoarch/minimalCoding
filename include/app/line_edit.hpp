@@ -35,6 +35,8 @@ private:
   void _insert(char32_t ch);
   void _backspace();
   void _delete();
+  void _word_backspace();
+  void _word_delete();
   void _move_left();
   void _move_right();
   void _move_word_left();

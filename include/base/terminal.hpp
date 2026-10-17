@@ -9,20 +9,16 @@ namespace coding {
 namespace term {
 
 enum class Key {
-  Up,
-  Down,
   Left,
   Right,
-  ViewUp,
-  ViewDown,
   WordLeft,
   WordRight,
   Enter,
   ShiftEnter,
   Backspace,
   Delete,
-  Collapse,
-  CollapseAll,
+  WordBackspace,
+  WordDelete,
   Paste,
   Quit,
   Resize,

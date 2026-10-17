@@ -182,14 +182,6 @@ bool Session::read_key(Key &out, bool raw, char32_t *text,
     if (raw && text != nullptr) {
       const wchar_t unit = key.uChar.UnicodeChar;
 
-      if (unit == 0x0A) {
-        out = Key::ViewDown;
-        return true;
-      }
-      if (unit == 0x0B) {
-        out = Key::ViewUp;
-        return true;
-      }
       if (unit == 0x03) {
         out = Key::Quit;
         return true;
@@ -217,12 +209,6 @@ bool Session::read_key(Key &out, bool raw, char32_t *text,
     }
 
     switch (key.wVirtualKeyCode) {
-    case VK_UP:
-      out = ctrl ? Key::ViewUp : Key::Up;
-      return true;
-    case VK_DOWN:
-      out = ctrl ? Key::ViewDown : Key::Down;
-      return true;
     case VK_LEFT:
       out = ctrl ? Key::WordLeft : Key::Left;
       return true;
@@ -233,34 +219,19 @@ bool Session::read_key(Key &out, bool raw, char32_t *text,
       out = shift ? Key::ShiftEnter : Key::Enter;
       return true;
     case VK_BACK:
-      out = Key::Backspace;
+      out = ctrl ? Key::WordBackspace : Key::Backspace;
       return true;
     case VK_DELETE:
-      out = Key::Delete;
+      out = ctrl ? Key::WordDelete : Key::Delete;
       return true;
     case VK_ESCAPE:
       out = Key::Quit;
       return true;
-    case 'J':
-      out = ctrl ? Key::ViewDown : Key::Down;
-      return true;
-    case 'K':
-      out = ctrl ? Key::ViewUp : Key::Up;
-      return true;
     case 'C':
-      out = ctrl ? Key::Quit : Key::Collapse;
+      out = Key::Quit;
       return true;
     case 'V':
       out = Key::Paste;
-      return true;
-    case VK_INSERT:
-      if (shift) {
-        out = Key::Paste;
-        return true;
-      }
-      break;
-    case 'R':
-      out = Key::CollapseAll;
       return true;
     case 'Q':
       out = Key::Quit;

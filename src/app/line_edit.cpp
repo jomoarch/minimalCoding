@@ -116,6 +116,21 @@ void Editor::_delete() {
   buffer.erase(cursor, end - cursor);
 }
 
+void Editor::_word_backspace() {
+  if (cursor == 0)
+    return;
+  const std::size_t start = step_word_backward(buffer, cursor);
+  buffer.erase(start, cursor - start);
+  cursor = start;
+}
+
+void Editor::_word_delete() {
+  if (cursor >= buffer.size())
+    return;
+  const std::size_t end = step_word_forward(buffer, cursor);
+  buffer.erase(cursor, end - cursor);
+}
+
 void Editor::_move_left() { cursor = step_back(buffer, cursor); }
 
 void Editor::_move_right() { cursor = step_forward(buffer, cursor); }
@@ -217,6 +232,12 @@ Outcome Editor::feed(term::Key key, char32_t ch) {
     return Outcome::Edited;
   case term::Key::Delete:
     _delete();
+    return Outcome::Edited;
+  case term::Key::WordBackspace:
+    _word_backspace();
+    return Outcome::Edited;
+  case term::Key::WordDelete:
+    _word_delete();
     return Outcome::Edited;
   case term::Key::Left:
     _move_left();
