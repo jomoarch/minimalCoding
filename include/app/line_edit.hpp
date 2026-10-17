@@ -32,10 +32,11 @@ struct Editor {
   std::string_view text() const noexcept { return buffer; }
 
 private:
-  void insert(char32_t ch);
-  void backspace();
-  void move_left();
-  void move_right();
+  void _insert(char32_t ch);
+  void _backspace();
+  void _delete();
+  void _move_left();
+  void _move_right();
 };
 
 std::string encode_utf8(char32_t ch);

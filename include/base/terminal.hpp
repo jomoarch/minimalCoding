@@ -18,6 +18,7 @@ enum class Key {
   Enter,
   ShiftEnter,
   Backspace,
+  Delete,
   Collapse,
   CollapseAll,
   Paste,

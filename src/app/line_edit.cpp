@@ -51,13 +51,13 @@ std::string encode_utf8(char32_t ch) {
   return out;
 }
 
-void Editor::insert(char32_t ch) {
+void Editor::_insert(char32_t ch) {
   const std::string bytes = encode_utf8(ch);
   buffer.insert(cursor, bytes);
   cursor += bytes.size();
 }
 
-void Editor::backspace() {
+void Editor::_backspace() {
   if (cursor == 0)
     return;
   const std::size_t start = step_back(buffer, cursor);
@@ -65,9 +65,16 @@ void Editor::backspace() {
   cursor = start;
 }
 
-void Editor::move_left() { cursor = step_back(buffer, cursor); }
+void Editor::_delete() {
+  if (cursor >= buffer.size())
+    return;
+  const std::size_t end = step_forward(buffer, cursor);
+  buffer.erase(cursor, end - cursor);
+}
 
-void Editor::move_right() { cursor = step_forward(buffer, cursor); }
+void Editor::_move_left() { cursor = step_back(buffer, cursor); }
+
+void Editor::_move_right() { cursor = step_forward(buffer, cursor); }
 
 void Editor::insert_text(std::string_view text) {
   if (text.empty())
@@ -150,21 +157,24 @@ Outcome Editor::feed(term::Key key, char32_t ch) {
   switch (key) {
   case term::Key::Text:
     if (ch >= 0x20 && ch != 0x7F) {
-      insert(ch);
+      _insert(ch);
       return Outcome::Edited;
     }
     return Outcome::None;
   case term::Key::ShiftEnter:
-    insert('\n');
+    _insert('\n');
     return Outcome::Edited;
   case term::Key::Backspace:
-    backspace();
+    _backspace();
+    return Outcome::Edited;
+  case term::Key::Delete:
+    _delete();
     return Outcome::Edited;
   case term::Key::Left:
-    move_left();
+    _move_left();
     return Outcome::Edited;
   case term::Key::Right:
-    move_right();
+    _move_right();
     return Outcome::Edited;
   case term::Key::Enter:
     return Outcome::Submitted;

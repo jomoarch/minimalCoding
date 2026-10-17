@@ -235,6 +235,9 @@ bool Session::read_key(Key &out, bool raw, char32_t *text,
     case VK_BACK:
       out = Key::Backspace;
       return true;
+    case VK_DELETE:
+      out = Key::Delete;
+      return true;
     case VK_ESCAPE:
       out = Key::Quit;
       return true;
