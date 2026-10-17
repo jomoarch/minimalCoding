@@ -29,6 +29,50 @@ std::size_t step_forward(std::string_view s, std::size_t from) {
   return i;
 }
 
+bool is_word_cp(char32_t c) {
+  if (c < 0x80) {
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') ||
+           (c >= 'a' && c <= 'z') || c == '_';
+  }
+  return true;
+}
+
+std::size_t step_word_forward(std::string_view s, std::size_t from) {
+  std::size_t i = from;
+  while (i < s.size()) {
+    const auto [cp, len] = text::decode_utf8(s, i);
+    if (is_word_cp(cp))
+      break;
+    i += len;
+  }
+  while (i < s.size()) {
+    const auto [cp, len] = text::decode_utf8(s, i);
+    if (!is_word_cp(cp))
+      break;
+    i += len;
+  }
+  return i;
+}
+
+std::size_t step_word_backward(std::string_view s, std::size_t from) {
+  std::size_t i = from;
+  while (i > 0) {
+    const std::size_t prev = step_back(s, i);
+    const auto [cp, len] = text::decode_utf8(s, prev);
+    if (is_word_cp(cp))
+      break;
+    i = prev;
+  }
+  while (i > 0) {
+    const std::size_t prev = step_back(s, i);
+    const auto [cp, len] = text::decode_utf8(s, prev);
+    if (!is_word_cp(cp))
+      break;
+    i = prev;
+  }
+  return i;
+}
+
 } // namespace
 
 std::string encode_utf8(char32_t ch) {
@@ -75,6 +119,10 @@ void Editor::_delete() {
 void Editor::_move_left() { cursor = step_back(buffer, cursor); }
 
 void Editor::_move_right() { cursor = step_forward(buffer, cursor); }
+
+void Editor::_move_word_left() { cursor = step_word_backward(buffer, cursor); }
+
+void Editor::_move_word_right() { cursor = step_word_forward(buffer, cursor); }
 
 void Editor::insert_text(std::string_view text) {
   if (text.empty())
@@ -175,6 +223,12 @@ Outcome Editor::feed(term::Key key, char32_t ch) {
     return Outcome::Edited;
   case term::Key::Right:
     _move_right();
+    return Outcome::Edited;
+  case term::Key::WordLeft:
+    _move_word_left();
+    return Outcome::Edited;
+  case term::Key::WordRight:
+    _move_word_right();
     return Outcome::Edited;
   case term::Key::Enter:
     return Outcome::Submitted;

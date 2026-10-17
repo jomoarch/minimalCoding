@@ -99,6 +99,13 @@ struct CharWidth {
   std::size_t bytes{0};
 };
 
+struct Codepoint {
+  char32_t value;
+  std::size_t length;
+};
+
+Codepoint decode_utf8(std::string_view s, std::size_t i) noexcept;
+
 CharWidth measure(std::string_view text, std::size_t index) noexcept;
 
 std::size_t display_width(std::string_view text) noexcept;

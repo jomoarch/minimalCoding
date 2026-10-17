@@ -15,6 +15,8 @@ enum class Key {
   Right,
   ViewUp,
   ViewDown,
+  WordLeft,
+  WordRight,
   Enter,
   ShiftEnter,
   Backspace,

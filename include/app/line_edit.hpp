@@ -37,6 +37,8 @@ private:
   void _delete();
   void _move_left();
   void _move_right();
+  void _move_word_left();
+  void _move_word_right();
 };
 
 std::string encode_utf8(char32_t ch);

@@ -8,10 +8,29 @@ namespace text {
 
 namespace {
 
-struct Codepoint {
-  char32_t value;
-  std::size_t length;
-};
+template <std::size_t N>
+bool in_ranges(const width_table::Range (&table)[N], char32_t cp) noexcept {
+  std::size_t lo = 0;
+  std::size_t hi = N;
+  while (lo < hi) {
+    const std::size_t mid = lo + (hi - lo) / 2;
+    if (cp < table[mid].lo)
+      hi = mid;
+    else if (cp > table[mid].hi)
+      lo = mid + 1;
+    else
+      return true;
+  }
+  return false;
+}
+
+bool is_wide(char32_t cp) noexcept { return in_ranges(width_table::kWide, cp); }
+
+bool is_zero_width(char32_t cp) noexcept {
+  return in_ranges(width_table::kZero, cp);
+}
+
+} // namespace
 
 Codepoint decode_utf8(std::string_view s, std::size_t i) noexcept {
   const auto c = static_cast<unsigned char>(s[i]);
@@ -44,30 +63,6 @@ Codepoint decode_utf8(std::string_view s, std::size_t i) noexcept {
   }
   return {value, length};
 }
-
-template <std::size_t N>
-bool in_ranges(const width_table::Range (&table)[N], char32_t cp) noexcept {
-  std::size_t lo = 0;
-  std::size_t hi = N;
-  while (lo < hi) {
-    const std::size_t mid = lo + (hi - lo) / 2;
-    if (cp < table[mid].lo)
-      hi = mid;
-    else if (cp > table[mid].hi)
-      lo = mid + 1;
-    else
-      return true;
-  }
-  return false;
-}
-
-bool is_wide(char32_t cp) noexcept { return in_ranges(width_table::kWide, cp); }
-
-bool is_zero_width(char32_t cp) noexcept {
-  return in_ranges(width_table::kZero, cp);
-}
-
-} // namespace
 
 CharWidth measure(std::string_view text, std::size_t index) noexcept {
   if (index >= text.size())
