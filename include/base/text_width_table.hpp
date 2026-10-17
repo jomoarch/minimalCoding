@@ -1,11 +1,18 @@
-// -- include/text_width_table.hpp
+// -- include/base/text_width_table.hpp
+//
+// Auto-generated file. Do not edit by hand.
+// Generator: gen_width_table.py
+// Unicode version: 16.0.0
+// Codepoint range: U+0000 .. U+10FFFF (skipping U+D800..U+DFFF surrogates)
+// kWide ranges: 123  (East Asian Width W/F, excluding zero-width)
+// kZero ranges: 370  (Mn/Me/Cf/Cc/Zl/Zp)
 
 #ifndef TEXT_WIDTH_TABLE_HPP
 #define TEXT_WIDTH_TABLE_HPP
 
+#include <cstddef>
 #include <cstdint>
 namespace coding {
-
 namespace text {
 namespace width_table {
 
@@ -13,6 +20,11 @@ struct Range {
   std::uint32_t lo;
   std::uint32_t hi;
 };
+
+inline constexpr char kUnicodeVersion[] = "16.0.0";
+
+inline constexpr std::size_t kWideRangeCount = 123;
+inline constexpr std::size_t kZeroRangeCount = 370;
 
 inline constexpr Range kWide[] = {
     {0x1100, 0x115F},   {0x231A, 0x231B},   {0x2329, 0x232A},
@@ -185,9 +197,13 @@ inline constexpr Range kZero[] = {
     {0xE0100, 0xE01EF},
 };
 
+static_assert(sizeof(kWide) / sizeof(kWide[0]) == kWideRangeCount,
+              "kWide range count mismatch");
+static_assert(sizeof(kZero) / sizeof(kZero[0]) == kZeroRangeCount,
+              "kZero range count mismatch");
+
 } // namespace width_table
 } // namespace text
-
 } // namespace coding
 
 #endif // TEXT_WIDTH_TABLE_HPP
