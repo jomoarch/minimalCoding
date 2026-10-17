@@ -163,6 +163,7 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
   status::Line spinner;
   monitor::Watch watch;
   bool interrupted = false;
+  bool eof_sent = false;
 
   while (!shared.done.load(std::memory_order_relaxed)) {
     term::Key key = term::Key::Text;
@@ -187,6 +188,13 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
           shared.stop.store(true, std::memory_order_relaxed);
           if (shared.job != nullptr)
             TerminateJobObject(static_cast<HANDLE>(shared.job), 1);
+        } else if (action == line::Outcome::EndOfInput && !eof_sent) {
+          eof_sent = true;
+          {
+            std::lock_guard<std::mutex> lock(shared.m);
+            shared.eof = true;
+          }
+          shared.cv.notify_all();
         }
       }
       got = session.read_any(key, ch, 0);

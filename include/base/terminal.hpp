@@ -21,6 +21,7 @@ enum class Key {
   WordDelete,
   Paste,
   Quit,
+  EndOfInput,
   Resize,
   Text
 };

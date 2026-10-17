@@ -12,7 +12,7 @@ namespace coding {
 
 namespace line {
 
-enum class Outcome { None, Edited, Submitted, Interrupt };
+enum class Outcome { None, Edited, Submitted, Interrupt, EndOfInput };
 
 struct Editor {
   std::string buffer;

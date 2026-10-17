@@ -255,6 +255,8 @@ Outcome Editor::feed(term::Key key, char32_t ch) {
     return Outcome::Submitted;
   case term::Key::Quit:
     return Outcome::Interrupt;
+  case term::Key::EndOfInput:
+    return buffer.empty() ? Outcome::EndOfInput : Outcome::None;
   default:
     return Outcome::None;
   }

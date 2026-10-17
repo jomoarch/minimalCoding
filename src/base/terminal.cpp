@@ -186,6 +186,10 @@ bool Session::read_key(Key &out, bool raw, char32_t *text,
         out = Key::Quit;
         return true;
       }
+      if (unit == 0x1A) {
+        out = Key::EndOfInput;
+        return true;
+      }
 
       if (unit >= 0x20 && unit != 0x7F) {
         char32_t codepoint = unit;
