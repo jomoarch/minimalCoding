@@ -154,6 +154,9 @@ Outcome Editor::feed(term::Key key, char32_t ch) {
       return Outcome::Edited;
     }
     return Outcome::None;
+  case term::Key::ShiftEnter:
+    insert('\n');
+    return Outcome::Edited;
   case term::Key::Backspace:
     backspace();
     return Outcome::Edited;
