@@ -29,11 +29,15 @@ bool interactive_stdin() noexcept {
          GetConsoleMode(hIn, &mode) != FALSE;
 }
 
+void wait_any_key() {
+  std::cout << "\nPress any key to exit ..." << std::flush;
+  _getch();
+}
+
 void pause_if_needed(int pause) {
   if (!should_pause(pause))
     return;
-  std::cout << "\nPress any key to exit ..." << std::flush;
-  _getch();
+  wait_any_key();
 }
 
 bool ask_yes_no(std::string_view question) {

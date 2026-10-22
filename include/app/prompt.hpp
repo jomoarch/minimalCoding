@@ -13,6 +13,8 @@ bool should_pause(int pause) noexcept;
 
 bool interactive_stdin() noexcept;
 
+void wait_any_key();
+
 void pause_if_needed(int pause);
 
 bool ask_save(const std::filesystem::path &target, std::string_view what);

@@ -6,30 +6,12 @@
 
 #include <cstdio>
 #include <ctime>
-#include <fstream>
 #include <system_error>
 namespace coding {
 
 namespace fs = std::filesystem;
 
 namespace {
-
-bool file_sha256(const fs::path &path, std::string &out) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-    return false;
-
-  hash::Sha256 hasher;
-  char buf[65536];
-  while (file) {
-    file.read(buf, sizeof(buf));
-    const std::streamsize n = file.gcount();
-    if (n > 0)
-      hasher.write(buf, static_cast<std::size_t>(n));
-  }
-  out = hasher.hex();
-  return !out.empty();
-}
 
 fs::path unique_target(const fs::path &dir, const std::string &name) {
   std::error_code ec;
@@ -76,7 +58,7 @@ Outcome clear(const fs::path &exe, bool park, std::string &note) {
   }
 
   std::string name;
-  if (!file_sha256(exe, name))
+  if (!hash::file_sha256(exe, name))
     name = "unreadable-" +
            std::to_string(static_cast<long long>(std::time(nullptr)));
 

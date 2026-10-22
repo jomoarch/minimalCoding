@@ -1,9 +1,7 @@
 base = "."
 
 [compiler]
-source = "src/main.cpp"
-output = "coding/build/main.exe"
-output_probe = "coding/build/main.probe.exe"
+source = "src"
 args = ["g++", "-std=c++17", "-O2", "-Wall", "-Wextra"]
 force_rebuild = false
 
@@ -12,7 +10,6 @@ enabled = true
 header = "inject/probe.h"
 
 [runner]
-work_dir = "work"
 time_limit_ms = 1000
 memory_limit_mb = 256
 status_line = true

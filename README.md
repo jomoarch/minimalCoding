@@ -18,13 +18,61 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
+## 一次运行发生了什么
+
+1. **选源文件**：`[compiler].source` 现在是一个**目录**（缺省是 `base`）。程序递归扫描它，只认 `.cpp`（大小写不敏感），不进入 `.` 开头的目录（`.git`、`.coding` 之类），按**最后修改时间**挑出最新的一个，并打印出来：
+
+   ```
+   [source] C:\...\a.cpp (modified 2026-06-01 12:00:00)
+   ```
+
+   时间并列时取路径字典序小的。目录不存在、不是目录、或者里面没有任何 `.cpp` 时，报错后**等你按任意键**再以退出码 `2` 结束。
+2. **按需编译**（见下文「什么时候重新编译」）。
+3. **运行**。产物和运行目录全部在 `<base>/.coding/` 下。
+
+### `.coding/` 里有什么
+
+| 路径                               | 内容                               |
+| ---------------------------------- | ---------------------------------- |
+| `.coding/build/<文件名>.exe`       | 原版可执行文件                     |
+| `.coding/build/<文件名>.probe.exe` | 注入版可执行文件（默认跑的就是它） |
+| `.coding/build/.cache`             | 构建缓存表                         |
+| `.coding/build/.trash/`            | 删不掉的旧 exe 挪到这里            |
+| `.coding/work/`                    | 运行目录                           |
+
+`<文件名>` 是源文件去掉 `.cpp` 之后的名字。不同目录下的同名 `.cpp` 会共用同一个 exe 和同一条缓存记录（都按文件名区分）。`[compiler].output`、`[compiler].output_probe`、`[runner].work_dir` 已经从配置里删掉，写了也会被忽略（stderr 上会提示一行）；`[io].single_input` / `[io].single_output` 不变，仍按 `base` 解析。
+
+### 什么时候重新编译
+
+三层判定：
+
+1. `config.toml` 或注入头比 exe 新 → 重编译（改了 `-O2`、换了头文件不用手动删 exe）；
+2. 否则 exe 比源文件新 → **不重编译**（连哈希都不算）；
+3. 否则算源文件的 SHA-256，和 `.cache` 里记的比：一样 → 不重编译（只是 `touch` 了文件、内容没变），不一样或者没有记录 → 重编译。
+
+`[build]` 那一行会带上原因，比如 `[build] up-to-date (a.exe, exe is newer)`、`[build] up-to-date (a.exe, sha256 matches)`、`[build] built -> ... (sha256 changed)`。
+
+### 缓存表 `.cache`
+
+纯文本，一行一条，最近的排在最上面：
+
+```
+# coding build cache: <sha256> <filename>, most recently built first
+9f2c... a.cpp
+0b71... b.cpp
+```
+
+重编译成功后会先把旧的那条删掉、再把新的一条插到第一行，所以最近编译的文件永远在最好找、最好改的位置。缓存命中时不重写这个文件（免得每次运行都动磁盘），也没有条数上限。
+
+> 热度处理说明：文件只有几十行时，查表本来就是线性的，排在最前面换不来多少速度；它真正的价值是「第一行就是上次编译的文件」以及手改方便。如果只想要一个映射，顺序其实无所谓。
+
 ## 一些细节
 
 ### 旧 exe 删除失败时
 
 重新编译要先把旧的 exe 删掉。Windows 上**正在运行的程序**和**没人回收的编译器进程**都会占住这个文件，这时删除会以**拒绝访问**失败，而重命名仍然可以。所以：
 
-1. 先打印**失败原因**，然后问你要不要把旧 exe 挪进**同目录下的 `.trash/`**，文件名就是它自己的 **SHA-256**。这是重命名，不受占用影响。
+1. 先打印**失败原因**，然后问你要不要把旧 exe 挪进**同目录下的 `.trash/`**（也就是 `<base>/.coding/build/.trash/`），文件名就是它自己的 **SHA-256**。这是重命名，不受占用影响。
 2. 连重命名都失败就真没招了：打印说明、等你**按任意键**，然后以退出码 `2` 结束，不再继续编译。
 
 ### stdout / stderr 的分离
@@ -110,14 +158,11 @@ bin/config.link  ->  ../shared/team.link  ->  C:/path/config.toml
 | 键                         | 说明                                                                                    |
 | -------------------------- | --------------------------------------------------------------------------------------- |
 | `base`                     | 文件里所有相对路径的起点；缺省为配置文件所在目录                                        |
-| `[compiler].source`        | 源文件                                                                                  |
-| `[compiler].output`        | 原版可执行文件输出路径                                                                  |
-| `[compiler].output_probe`  | 注入版输出路径；缺省由 `output` 派生，必须与 `output` 不同                              |
+| `[compiler].source`        | 源文件**目录**；递归扫描它、挑最新的 `.cpp`。缺省为 `base`                              |
 | `[compiler].args`          | 完整编译命令；源码与 `-o <output>` 会自动追加。默认 `g++ -std=c++17`                    |
-| `[compiler].force_rebuild` | `true` 时每次运行都重新编译，,默认 `false`                                              |
+| `[compiler].force_rebuild` | `true` 时每次运行都重新编译，默认 `false`                                               |
 | `[inject].enabled`         | 是否注入 `probe.h`（默认 `true`）；关掉就不需要头文件                                   |
 | `[inject].header`          | 要注入的头文件；缺省按 `base`、配置文件目录、`.exe` 目录依次找 `include/inject/probe.h` |
-| `[runner].work_dir`        | 运行目录                                                                                |
 | `[runner].time_limit_ms`   | CPU 时间上限；不写就永远不杀超时程序                                                    |
 | `[runner].memory_limit_mb` | 内存上限；`0` 表示不限                                                                  |
 | `[io].single_input`        | `cg_s` 的输入文件                                                                       |
@@ -125,3 +170,5 @@ bin/config.link  ->  ../shared/team.link  ->  C:/path/config.toml
 | `[io].colorize_output`     | 是否给程序自身输出染色（默认 `true`）                                                   |
 | `[io].merge_stderr`        | 是否把 stderr 也写进输出文件；不写就各自维持现状（见上文「stderr 要不要进输出文件」）   |
 | `[io].print_input`         | 回显时是否先把输入打出来；默认 `false`                                                  |
+
+可执行文件、运行目录与缓存表都由程序在 `<base>/.coding/` 下生成，**不能**再用配置指定；旧配置里的 `[compiler].output`、`[compiler].output_probe`、`[runner].work_dir` 会被忽略。

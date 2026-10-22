@@ -26,6 +26,16 @@ bool load(AppConfig &out) {
   return true;
 }
 
+int settle(const ModeOutcome &outcome) {
+  if (outcome.wait_key) {
+    if (prompt::interactive_stdin())
+      prompt::wait_any_key();
+  } else {
+    prompt::pause_if_needed(-1);
+  }
+  return outcome.code;
+}
+
 } // namespace
 
 int run_single() {
@@ -34,9 +44,7 @@ int run_single() {
   AppConfig cfg;
   if (!load(cfg))
     return 2;
-  const int code = run_single_file(cfg);
-  prompt::pause_if_needed(-1);
-  return code;
+  return settle(run_single_file(cfg));
 }
 
 int run_interactive() {
@@ -45,9 +53,7 @@ int run_interactive() {
   AppConfig cfg;
   if (!load(cfg))
     return 2;
-  const int code = run_interactive(cfg);
-  prompt::pause_if_needed(-1);
-  return code;
+  return settle(run_interactive(cfg));
 }
 
 } // namespace app

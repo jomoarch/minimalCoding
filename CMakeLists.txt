@@ -17,6 +17,7 @@ set(CORE_SOURCES
   src/base/terminal.cpp
   src/base/path.cpp
   src/io/config.cpp
+  src/io/source.cpp
   src/process/accounting.cpp
   src/process/compiler.cpp
   src/process/runner_single.cpp
@@ -24,6 +25,7 @@ set(CORE_SOURCES
   src/app/app.cpp
   src/app/modes.cpp
   src/app/builder.cpp
+  src/app/build_cache.cpp
   src/app/prompt.cpp
   src/app/stale_exe.cpp
   src/app/interactive_ui.cpp

@@ -4,8 +4,14 @@
 #include "io/config.hpp"
 namespace coding {
 
-int run_interactive(const AppConfig &cfg);
-int run_single_file(const AppConfig &cfg);
+struct ModeOutcome {
+  int code{0};
+
+  bool wait_key{false};
+};
+
+ModeOutcome run_interactive(const AppConfig &cfg);
+ModeOutcome run_single_file(const AppConfig &cfg);
 
 } // namespace coding
 

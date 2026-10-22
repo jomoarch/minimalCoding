@@ -2,8 +2,8 @@
 #define BUILDER_HPP
 
 #include <filesystem>
-#include <vector>
 #include <string>
+#include <vector>
 namespace coding {
 
 struct BuildOption {
@@ -15,6 +15,8 @@ struct BuildOption {
 
   std::filesystem::path inject_header;
 
+  std::filesystem::path cache_path;
+
   bool force_rebuild{false};
 };
 
@@ -22,6 +24,7 @@ struct BuildResult {
   bool success{false};
   bool rebuilt{false};
   std::string message;
+  std::string reason;
 
   bool ok() const noexcept { return success; }
   explicit operator bool() const noexcept { return success; }

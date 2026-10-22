@@ -1,16 +1,19 @@
 #include "app/modes.hpp"
 
 #include "app/builder.hpp"
-#include "app/prompt.hpp"
 #include "app/interactive_ui.hpp"
-#include "process/runner_single.hpp"
+#include "app/prompt.hpp"
 #include "base/color.hpp"
 #include "base/path.hpp"
 #include "base/text.hpp"
+#include "io/source.hpp"
+#include "process/runner_single.hpp"
 
 #include <windows.h>
 
+#include <cstdio>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -23,28 +26,8 @@ namespace {
 
 enum class BuildTarget { Normal, Probe };
 
-std::filesystem::path target_exe(const AppConfig &cfg, BuildTarget target) {
-  return target == BuildTarget::Probe ? cfg.exe_path_probe : cfg.exe_path;
-}
-
 bool uses_probe_build(const AppConfig &cfg) {
   return cfg.inject_probe && !cfg.inject_header.empty();
-}
-
-bool need_compiler_inputs(const AppConfig &cfg, std::string &error) {
-  if (cfg.source_path.empty()) {
-    error = "[compiler].source is not set";
-    return false;
-  }
-  if (cfg.exe_path.empty()) {
-    error = "[compiler].output is not set";
-    return false;
-  }
-  if (cfg.work_dir.empty()) {
-    error = "[runner].work_dir is not set";
-    return false;
-  }
-  return true;
 }
 
 bool need_probe_header(const AppConfig &cfg, std::string &error) {
@@ -57,24 +40,59 @@ bool need_probe_header(const AppConfig &cfg, std::string &error) {
             " (set [inject].header, or [inject].enabled = false)";
     return false;
   }
-  if (cfg.exe_path_probe == cfg.exe_path) {
-    error = "[compiler].output_probe must differ from [compiler].output - the "
-            "probe build injects a header that cg_b must not see";
-    return false;
-  }
   return true;
 }
 
-int report_missing(const std::string &error) {
-  std::cerr << color::err("[config] ", error) << "\n";
-  return 2;
+std::string format_time(const std::filesystem::path &path) {
+  WIN32_FILE_ATTRIBUTE_DATA data{};
+  if (!::GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data))
+    return {};
+
+  FILETIME local{};
+  if (!::FileTimeToLocalFileTime(&data.ftLastWriteTime, &local))
+    return {};
+
+  SYSTEMTIME stamp{};
+  if (!::FileTimeToSystemTime(&local, &stamp))
+    return {};
+
+  char buffer[32]{};
+  std::snprintf(
+      buffer, sizeof(buffer), "%04u-%02u-%02u %02u:%02u:%02u",
+      static_cast<unsigned>(stamp.wYear), static_cast<unsigned>(stamp.wMonth),
+      static_cast<unsigned>(stamp.wDay), static_cast<unsigned>(stamp.wHour),
+      static_cast<unsigned>(stamp.wMinute),
+      static_cast<unsigned>(stamp.wSecond));
+  return buffer;
 }
 
-BuildResult build_step(const AppConfig &cfg, BuildTarget target) {
+void print_source(const PickedSource &pick) {
+  std::cout << color::info("[source] ") << show_path(pick.path);
+  const std::string stamp = format_time(pick.path);
+  if (!stamp.empty())
+    std::cout << color::gray(" (modified ", stamp, ")");
+  std::cout << '\n';
+}
+
+bool pick_target(const AppConfig &cfg, BuildPaths &paths, PickedSource &pick,
+                 std::string &error) {
+  SourceResult found = newest_source(cfg.source_dir);
+  if (!found) {
+    error = found.message;
+    return false;
+  }
+  pick = found.source;
+  paths = build_paths(cfg, pick.path);
+  return true;
+}
+
+BuildResult build_step(const AppConfig &cfg, const BuildPaths &paths,
+                       BuildTarget target) {
   BuildOption opt;
-  opt.source_path = cfg.source_path;
-  opt.output_path = target_exe(cfg, target);
+  opt.source_path = paths.source;
+  opt.output_path = target == BuildTarget::Probe ? paths.exe_probe : paths.exe;
   opt.args = cfg.args;
+  opt.cache_path = cfg.cache_path;
   opt.extra_deps.push_back(cfg.config_path);
 
   if (target == BuildTarget::Probe && uses_probe_build(cfg)) {
@@ -92,10 +110,17 @@ BuildResult build_step(const AppConfig &cfg, BuildTarget target) {
 
 void print_build_line(const std::filesystem::path &exe, const BuildResult &s) {
   color::Scope green(std::cout, {color::Code::Green, color::Code::Bold});
-  if (s.rebuilt)
-    std::cout << "[build] built -> " << show_path(exe) << '\n';
-  else
-    std::cout << "[build] up-to-date (" << exe.filename().string() << ")\n";
+  if (s.rebuilt) {
+    std::cout << "[build] built -> " << show_path(exe);
+  } else {
+    std::cout << "[build] up-to-date (" << text::to_text(exe.filename());
+    if (!s.reason.empty())
+      std::cout << ", " << s.reason;
+    std::cout << ')';
+  }
+  if (s.rebuilt && !s.reason.empty())
+    std::cout << " (" << s.reason << ')';
+  std::cout << '\n';
 }
 
 bool write_text(const fs::path &path, const std::string &text) {
@@ -199,20 +224,37 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run,
 
 } // namespace
 
-int run_interactive(const AppConfig &cfg) {
-  std::string missing;
-  if (!need_compiler_inputs(cfg, missing) || !need_probe_header(cfg, missing))
-    return report_missing(missing);
+ModeOutcome run_interactive(const AppConfig &cfg) {
+  ModeOutcome out;
 
-  const BuildResult built = build_step(cfg, BuildTarget::Probe);
-  if (!built)
-    return 2;
-  print_build_line(cfg.exe_path_probe, built);
+  BuildPaths paths;
+  PickedSource pick;
+  std::string error;
+  if (!pick_target(cfg, paths, pick, error)) {
+    std::cerr << color::err("[source] ", error) << "\n";
+    out.code = 2;
+    out.wait_key = true;
+    return out;
+  }
+  print_source(pick);
+
+  if (!need_probe_header(cfg, error)) {
+    std::cerr << color::err("[config] ", error) << "\n";
+    out.code = 2;
+    return out;
+  }
+
+  const BuildResult built = build_step(cfg, paths, BuildTarget::Probe);
+  if (!built) {
+    out.code = 2;
+    return out;
+  }
+  print_build_line(paths.exe_probe, built);
 
   std::cout << "[run] interactive mode\n";
 
   SingleRunOption opt;
-  opt.exe_path = cfg.exe_path_probe;
+  opt.exe_path = paths.exe_probe;
   opt.work_dir = cfg.work_dir;
   opt.echo = true;
   opt.colorize_output = cfg.colorize_output;
@@ -226,34 +268,54 @@ int run_interactive(const AppConfig &cfg) {
     opt.stdin_from_console = true;
     run = run_single(opt);
   }
-  return finish_single(cfg, run, true);
+  out.code = finish_single(cfg, run, true);
+  return out;
 }
 
-int run_single_file(const AppConfig &cfg) {
-  std::string missing;
-  if (!need_compiler_inputs(cfg, missing) || !need_probe_header(cfg, missing))
-    return report_missing(missing);
+ModeOutcome run_single_file(const AppConfig &cfg) {
+  ModeOutcome out;
+
+  BuildPaths paths;
+  PickedSource pick;
+  std::string error;
+  if (!pick_target(cfg, paths, pick, error)) {
+    std::cerr << color::err("[source] ", error) << "\n";
+    out.code = 2;
+    out.wait_key = true;
+    return out;
+  }
+  print_source(pick);
+
+  if (!need_probe_header(cfg, error)) {
+    std::cerr << color::err("[config] ", error) << "\n";
+    out.code = 2;
+    return out;
+  }
 
   if (cfg.single_input.empty()) {
     std::cerr << color::err("[io] [io].single_input is required in -s mode")
               << "\n";
-    return 2;
+    out.code = 2;
+    return out;
   }
 
   std::ifstream in(cfg.single_input, std::ios::binary);
   if (!in) {
     std::cerr << color::err("[io] Cannot open single_input: ", cfg.single_input)
               << "\n";
-    return 2;
+    out.code = 2;
+    return out;
   }
   std::ostringstream ss;
   ss << in.rdbuf();
   const std::string input = ss.str();
 
-  const BuildResult built = build_step(cfg, BuildTarget::Probe);
-  if (!built)
-    return 2;
-  print_build_line(cfg.exe_path_probe, built);
+  const BuildResult built = build_step(cfg, paths, BuildTarget::Probe);
+  if (!built) {
+    out.code = 2;
+    return out;
+  }
+  print_build_line(paths.exe_probe, built);
 
   const std::size_t input_size = input.size();
   std::cout << color::ok("[io] input <- ", cfg.single_input, " (", input_size,
@@ -269,7 +331,7 @@ int run_single_file(const AppConfig &cfg) {
   std::cout << "\n--- output ---\n";
 
   SingleRunOption opt;
-  opt.exe_path = cfg.exe_path_probe;
+  opt.exe_path = paths.exe_probe;
   opt.work_dir = cfg.work_dir;
   opt.stdin_from_console = false;
   opt.input_text = input;
@@ -280,7 +342,8 @@ int run_single_file(const AppConfig &cfg) {
   opt.time_limit_ms = cfg.time_limit;
   opt.memory_limit_bytes = cfg.memory_limit_bytes;
 
-  return finish_single(cfg, run_single(opt), false);
+  out.code = finish_single(cfg, run_single(opt), false);
+  return out;
 }
 
 } // namespace coding

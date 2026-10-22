@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <bcrypt.h>
 
+#include <fstream>
 #include <string>
 #include <utility>
 namespace coding {
@@ -131,6 +132,28 @@ std::string Sha256::hex() {
     out.push_back(digits[byte & 0x0Fu]);
   }
   return out;
+}
+
+bool file_sha256(const std::filesystem::path &path, std::string &out) {
+  out.clear();
+
+  std::ifstream file(path, std::ios::binary);
+  if (!file)
+    return false;
+
+  Sha256 hasher;
+  char buffer[65536];
+  while (file) {
+    file.read(buffer, sizeof(buffer));
+    const std::streamsize got = file.gcount();
+    if (got > 0)
+      hasher.write(buffer, static_cast<std::size_t>(got));
+  }
+  if (file.bad())
+    return false;
+
+  out = hasher.hex();
+  return !out.empty();
 }
 
 } // namespace hash

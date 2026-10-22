@@ -40,11 +40,6 @@ std::filesystem::path module_dir() {
   return std::filesystem::path(buf).parent_path();
 }
 
-std::filesystem::path derive_probe_path(const std::filesystem::path &p) {
-  return compress_path(p.parent_path() /
-                       (p.stem().string() + ".probe" + p.extension().string()));
-}
-
 std::filesystem::path read_pointer(const std::filesystem::path &link) {
   std::error_code ec;
   if (!std::filesystem::is_regular_file(link, ec))
@@ -275,7 +270,9 @@ ConfigResult load_config(const std::filesystem::path &path) {
     std::cerr << "[config] " << located.note << "\n";
 
   const std::filesystem::path &config = located.path;
-  r.config.config_path = config;
+  // Keep the dependency recorded by the builder independent of the CWD that
+  // happens to have been used to start the tool.
+  r.config.config_path = compress_path(config, false, true);
 
   toml::table tbl;
   try {
@@ -292,9 +289,7 @@ ConfigResult load_config(const std::filesystem::path &path) {
 
   // [compiler]
   read_section(tbl, "compiler", [&](const toml::table &t) {
-    read_field(t, "source", c.source_path);
-    read_field(t, "output", c.exe_path);
-    read_field(t, "output_probe", c.exe_path_probe);
+    read_field(t, "source", c.source_dir);
     read_field(t, "force_rebuild", c.force_rebuild);
     read_string_array(t, "args", c.args);
   });
@@ -307,7 +302,6 @@ ConfigResult load_config(const std::filesystem::path &path) {
 
   // [runner]
   read_section(tbl, "runner", [&](const toml::table &t) {
-    read_field(t, "work_dir", c.work_dir);
     read_field_as<int64_t>(t, "time_limit_ms", c.time_limit, [](int64_t v) {
       return std::chrono::milliseconds(v);
     });
@@ -340,11 +334,16 @@ ConfigResult load_config(const std::filesystem::path &path) {
     base = resolve(config_dir, std::filesystem::path(raw_base));
   c.base = compress_path(base, false, true);
 
-  resolve_all(base, c.source_path, c.exe_path, c.exe_path_probe, c.work_dir,
-              c.single_input, c.single_output, c.inject_header);
+  resolve_all(base, c.source_dir, c.single_input, c.single_output,
+              c.inject_header);
 
-  if (c.exe_path_probe.empty() && !c.exe_path.empty())
-    c.exe_path_probe = derive_probe_path(c.exe_path);
+  if (c.source_dir.empty())
+    c.source_dir = c.base;
+
+  c.coding_dir = compress_path(c.base / ".coding");
+  c.build_dir = compress_path(c.coding_dir / "build");
+  c.cache_path = compress_path(c.build_dir / ".cache");
+  c.work_dir = compress_path(c.coding_dir / "work");
 
   if (c.inject_probe && c.inject_header.empty()) {
     std::error_code ec;
@@ -361,12 +360,44 @@ ConfigResult load_config(const std::filesystem::path &path) {
       c.inject_header = compress_path(at_base);
   }
 
-  if (!c.inject_probe)
-    c.exe_path_probe = compress_path(c.exe_path);
+  std::string ignored;
+  const auto note_ignored = [&ignored](const toml::table *t,
+                                       std::string_view key,
+                                       const char *label) {
+    if (t != nullptr && t->contains(key)) {
+      if (!ignored.empty())
+        ignored += ", ";
+      ignored += label;
+    }
+  };
+  note_ignored(tbl["compiler"].as_table(), "output", "[compiler].output");
+  note_ignored(tbl["compiler"].as_table(), "output_probe",
+               "[compiler].output_probe");
+  note_ignored(tbl["runner"].as_table(), "work_dir", "[runner].work_dir");
+  if (!ignored.empty())
+    std::cerr << "[config] ignoring " << ignored << ": generated under "
+              << show_path(c.coding_dir) << "\n";
 
   r.success = true;
   r.message = "OK";
   return r;
+}
+
+BuildPaths build_paths(const AppConfig &cfg,
+                       const std::filesystem::path &source) {
+  BuildPaths paths;
+  paths.source = source;
+
+  std::string stem = source.stem().string();
+  if (stem.empty())
+    stem = source.filename().string();
+
+  paths.exe = compress_path(cfg.build_dir / (stem + ".exe"));
+  if (cfg.inject_probe && !cfg.inject_header.empty())
+    paths.exe_probe = compress_path(cfg.build_dir / (stem + ".probe.exe"));
+  else
+    paths.exe_probe = paths.exe;
+  return paths;
 }
 
 } // namespace coding

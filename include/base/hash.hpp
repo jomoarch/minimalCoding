@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 namespace coding {
@@ -31,6 +32,8 @@ private:
   void *object_{nullptr};
   void *algorithm_{nullptr};
 };
+
+bool file_sha256(const std::filesystem::path &path, std::string &out);
 
 } // namespace hash
 
