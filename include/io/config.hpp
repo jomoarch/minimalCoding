@@ -15,7 +15,7 @@ struct AppConfig {
 
   std::filesystem::path base;
 
-  std::filesystem::path source_dir;
+  std::filesystem::path source_path;
   std::vector<std::string> args;
 
   std::filesystem::path coding_dir;

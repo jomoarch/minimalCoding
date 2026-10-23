@@ -270,8 +270,6 @@ ConfigResult load_config(const std::filesystem::path &path) {
     std::cerr << "[config] " << located.note << "\n";
 
   const std::filesystem::path &config = located.path;
-  // Keep the dependency recorded by the builder independent of the CWD that
-  // happens to have been used to start the tool.
   r.config.config_path = compress_path(config, false, true);
 
   toml::table tbl;
@@ -289,7 +287,7 @@ ConfigResult load_config(const std::filesystem::path &path) {
 
   // [compiler]
   read_section(tbl, "compiler", [&](const toml::table &t) {
-    read_field(t, "source", c.source_dir);
+    read_field(t, "source", c.source_path);
     read_field(t, "force_rebuild", c.force_rebuild);
     read_string_array(t, "args", c.args);
   });
@@ -334,11 +332,11 @@ ConfigResult load_config(const std::filesystem::path &path) {
     base = resolve(config_dir, std::filesystem::path(raw_base));
   c.base = compress_path(base, false, true);
 
-  resolve_all(base, c.source_dir, c.single_input, c.single_output,
+  resolve_all(base, c.source_path, c.single_input, c.single_output,
               c.inject_header);
 
-  if (c.source_dir.empty())
-    c.source_dir = c.base;
+  if (c.source_path.empty())
+    c.source_path = c.base;
 
   c.coding_dir = compress_path(c.base / ".coding");
   c.build_dir = compress_path(c.coding_dir / "build");

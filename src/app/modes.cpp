@@ -76,7 +76,7 @@ void print_source(const PickedSource &pick) {
 
 bool pick_target(const AppConfig &cfg, BuildPaths &paths, PickedSource &pick,
                  std::string &error) {
-  SourceResult found = newest_source(cfg.source_dir);
+  SourceResult found = pick_source(cfg.source_path);
   if (!found) {
     error = found.message;
     return false;

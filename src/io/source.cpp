@@ -21,32 +21,13 @@ bool is_dot_directory(const fs::path &p) {
   return !name.empty() && name.front() == '.';
 }
 
-} // namespace
-
-SourceResult newest_source(const fs::path &dir) {
-  SourceResult r;
-
-  if (dir.empty()) {
-    r.message = "[compiler].source is not set";
-    return r;
-  }
-
+bool newest_under(const fs::path &dir, PickedSource &out, std::string &error) {
   std::error_code ec;
-  if (!fs::exists(dir, ec)) {
-    r.message = "source directory not found: " + show_path(dir);
-    return r;
-  }
-  if (!fs::is_directory(dir, ec)) {
-    r.message = "source is not a directory: " + show_path(dir) +
-                " (set [compiler].source to a folder)";
-    return r;
-  }
-
   fs::recursive_directory_iterator it(
       dir, fs::directory_options::skip_permission_denied, ec);
   if (ec) {
-    r.message = "cannot scan " + show_path(dir) + ": " + ec.message();
-    return r;
+    error = "cannot scan " + show_path(dir) + ": " + ec.message();
+    return false;
   }
   const fs::recursive_directory_iterator end;
 
@@ -64,9 +45,8 @@ SourceResult newest_source(const fs::path &dir) {
       std::error_code time_ec;
       const fs::file_time_type stamp = entry.last_write_time(time_ec);
       if (!time_ec) {
-        const bool newer =
-            !found || stamp > best.mtime ||
-            (stamp == best.mtime && entry.path() < best.path);
+        const bool newer = !found || stamp > best.mtime ||
+                           (stamp == best.mtime && entry.path() < best.path);
         if (newer) {
           found = true;
           best.path = entry.path();
@@ -78,21 +58,67 @@ SourceResult newest_source(const fs::path &dir) {
     it.increment(ec);
     if (ec) {
       if (!found) {
-        r.message = "cannot scan " + show_path(dir) + ": " + ec.message();
-        return r;
+        error = "cannot scan " + show_path(dir) + ": " + ec.message();
+        return false;
       }
       break;
     }
   }
 
   if (!found) {
-    r.message = "no .cpp source file under " + show_path(dir);
+    error = "no .cpp source file under " + show_path(dir);
+    return false;
+  }
+  out = std::move(best);
+  return true;
+}
+
+} // namespace
+
+SourceResult pick_source(const fs::path &target) {
+  SourceResult r;
+
+  if (target.empty()) {
+    r.message = "[compiler].source is not set";
+    return r;
+  }
+
+  std::error_code ec;
+  if (!fs::exists(target, ec)) {
+    r.message = "source not found: " + show_path(target);
+    return r;
+  }
+
+  if (fs::is_directory(target, ec)) {
+    PickedSource pick;
+    std::string error;
+    if (!newest_under(target, pick, error)) {
+      r.message = error;
+      return r;
+    }
+    r.success = true;
+    r.message = "OK";
+    r.source = std::move(pick);
+    return r;
+  }
+
+  if (!fs::is_regular_file(target, ec)) {
+    r.message = "source is neither a directory nor a regular file: " +
+                show_path(target);
+    return r;
+  }
+
+  if (!is_cpp_source(target)) {
+    r.message = "source is not a .cpp file: " + show_path(target) +
+                " (only .cpp files are compiled)";
     return r;
   }
 
   r.success = true;
   r.message = "OK";
-  r.source = std::move(best);
+  r.source.path = target;
+  std::error_code time_ec;
+  r.source.mtime = fs::last_write_time(target, time_ec);
   return r;
 }
 

@@ -15,7 +15,7 @@ struct SourceResult : ResultBase {
   PickedSource source;
 };
 
-[[nodiscard]] SourceResult newest_source(const std::filesystem::path &dir);
+[[nodiscard]] SourceResult pick_source(const std::filesystem::path &target);
 
 } // namespace coding
 
