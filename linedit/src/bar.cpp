@@ -1,15 +1,13 @@
-#include "app/console_bar.hpp"
+#include "linedit/bar.hpp"
 
-#include "app/line_edit.hpp"
-#include "base/text.hpp"
+#include "linedit/editor.hpp"
 
 #include <windows.h>
 
 #include <algorithm>
 #include <string>
 
-namespace coding {
-namespace bar {
+namespace linedit {
 
 namespace {
 
@@ -32,7 +30,7 @@ void raw_write(HANDLE h, std::string_view bytes) {
 
 Bar::~Bar() { close(); }
 
-bool Bar::open(term::Session &session, std::string &error) {
+bool Bar::open(Session &session, std::string &error) {
   if (active_)
     return true;
 
@@ -43,7 +41,7 @@ bool Bar::open(term::Session &session, std::string &error) {
     return false;
   }
 
-  const term::Size size = session.size();
+  const Size size = session.size();
   if (size.rows < kMinRows || size.columns < kMinColumns) {
     error = "the terminal is too small for a status line";
     return false;
@@ -202,6 +200,7 @@ void Bar::commit_text(std::string_view text) {
   painted_ = false;
   paint();
 }
+
 void Bar::resize() {
   if (!active_)
     return;
@@ -243,6 +242,7 @@ void Bar::ensure_room(std::size_t echo_rows) {
   if (anchor_.row < 0)
     anchor_.row = 0;
 }
+
 void Bar::paint() {
   if (!active_)
     return;
@@ -259,8 +259,8 @@ void Bar::paint() {
       columns_ > static_cast<std::size_t>(anchor_.column)
           ? columns_ - static_cast<std::size_t>(anchor_.column)
           : 0;
-  const line::Layout laid =
-      line::layout_text(input_text_, input_cursor_bytes_, first_room, columns_);
+  const Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, first_room, columns_);
 
   ensure_room(laid.rows.size());
 
@@ -281,7 +281,6 @@ void Bar::paint() {
   }
 
   if (status_changed) {
-
     place(Pos{status_row, 0});
     write_bytes("\x1b[7m");
     write_bytes(status_text_);
@@ -307,5 +306,5 @@ void Bar::paint() {
   painted_status_row_ = status_row;
   painted_area_rows_ = area_rows;
 }
-} // namespace bar
-} // namespace coding
+
+} // namespace linedit

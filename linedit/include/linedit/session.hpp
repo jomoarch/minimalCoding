@@ -1,39 +1,11 @@
-#ifndef TERMINAL_HPP
-#define TERMINAL_HPP
+#ifndef LINEDIT_SESSION_HPP
+#define LINEDIT_SESSION_HPP
 
-#include <cstddef>
+#include "linedit/key.hpp"
+
 #include <string>
 #include <string_view>
-namespace coding {
-
-namespace term {
-
-enum class Key {
-  Left,
-  Right,
-  WordLeft,
-  WordRight,
-  Enter,
-  ShiftEnter,
-  Backspace,
-  Delete,
-  WordBackspace,
-  WordDelete,
-  Paste,
-  Quit,
-  EndOfInput,
-  Resize,
-  Text
-};
-
-struct Size {
-  std::size_t columns{0};
-  std::size_t rows{0};
-};
-
-inline constexpr unsigned kWaitForever = 0xFFFFFFFFu;
-
-enum class Screen { Alternate, Normal };
+namespace linedit {
 
 class Session {
 public:
@@ -72,8 +44,6 @@ private:
   bool alt_{false};
 };
 
-} // namespace term
+} // namespace linedit
 
-} // namespace coding
-
-#endif // TERMINAL_HPP
+#endif // LINEDIT_SESSION_HPP

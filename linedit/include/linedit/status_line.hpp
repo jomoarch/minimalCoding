@@ -1,12 +1,11 @@
-#ifndef STATUS_LINE_HPP
-#define STATUS_LINE_HPP
+#ifndef LINEDIT_STATUS_LINE_HPP
+#define LINEDIT_STATUS_LINE_HPP
 
 #include <chrono>
 #include <cstddef>
 #include <string>
 #include <string_view>
-
-namespace coding {
+namespace linedit {
 
 namespace status {
 
@@ -23,6 +22,6 @@ struct Line {
 };
 
 } // namespace status
-} // namespace coding
+} // namespace linedit
 
-#endif // STATUS_LINE_HPP
+#endif // LINEDIT_STATUS_LINE_HPP

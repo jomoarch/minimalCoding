@@ -1,15 +1,12 @@
-#ifndef CONSOLE_BAR_HPP
-#define CONSOLE_BAR_HPP
+#ifndef LINEDIT_BAR_HPP
+#define LINEDIT_BAR_HPP
 
-#include "base/terminal.hpp"
+#include "linedit/session.hpp"
 
 #include <cstddef>
 #include <string>
 #include <string_view>
-
-namespace coding {
-
-namespace bar {
+namespace linedit {
 
 class Bar {
 public:
@@ -18,7 +15,7 @@ public:
   Bar(const Bar &) = delete;
   Bar &operator=(const Bar &) = delete;
 
-  bool open(term::Session &session, std::string &error);
+  bool open(Session &session, std::string &error);
   void close() noexcept;
 
   bool active() const noexcept { return active_; }
@@ -69,7 +66,6 @@ private:
   bool cursor_hidden_{false};
 };
 
-} // namespace bar
-} // namespace coding
+} // namespace linedit
 
-#endif // CONSOLE_BAR_HPP
+#endif // LINEDIT_BAR_HPP

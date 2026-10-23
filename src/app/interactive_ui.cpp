@@ -1,11 +1,11 @@
 #include "app/interactive_ui.hpp"
 
 #include "app/clipboard.hpp"
-#include "app/console_bar.hpp"
-#include "app/line_edit.hpp"
-#include "app/status_line.hpp"
 #include "base/color.hpp"
-#include "base/terminal.hpp"
+#include "linedit/bar.hpp"
+#include "linedit/editor.hpp"
+#include "linedit/session.hpp"
+#include "linedit/status_line.hpp"
 #include "monitor/monitor.hpp"
 
 #include <windows.h>
@@ -63,7 +63,7 @@ void queue_input(Shared &shared, std::string_view text) {
   shared.cv.notify_all();
 }
 
-void submit_line(line::Editor &editor, Shared &shared, bar::Bar &bar) {
+void submit_line(linedit::Editor &editor, Shared &shared, linedit::Bar &bar) {
   const std::string text = editor.buffer + "\n";
   queue_input(shared, text);
   {
@@ -75,24 +75,24 @@ void submit_line(line::Editor &editor, Shared &shared, bar::Bar &bar) {
   bar.set_input(editor.text(), editor.cursor);
 }
 
-void submit_paste(std::string text, line::Editor &editor, Shared &shared,
-                  bar::Bar &bar) {
+void submit_paste(std::string text, linedit::Editor &editor, Shared &shared,
+                  linedit::Bar &bar) {
   (void)shared;
   if (text.empty())
     return;
-  editor.insert_text(line::clean_paste(text));
+  editor.insert_text(linedit::clean_paste(text));
   bar.set_input(editor.text(), editor.cursor);
 }
 } // namespace
 
 bool run(const AppConfig &cfg, const SingleRunOption &base,
          SingleRunResult &out) {
-  term::Session session;
+  linedit::Session session;
   std::string error;
-  if (!term::Session::open(session, error, term::Screen::Normal))
+  if (!linedit::Session::open(session, error, linedit::Screen::Normal))
     return false;
 
-  bar::Bar bar;
+  linedit::Bar bar;
   if (!bar.open(session, error))
     return false;
 
@@ -159,26 +159,26 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
     shared.done.store(true, std::memory_order_relaxed);
   });
 
-  line::Editor editor;
-  status::Line spinner;
+  linedit::Editor editor;
+  linedit::status::Line spinner;
   monitor::Watch watch;
   bool interrupted = false;
   bool eof_sent = false;
 
   while (!shared.done.load(std::memory_order_relaxed)) {
-    term::Key key = term::Key::Text;
+    linedit::Key key = linedit::Key::Text;
     char32_t ch = 0;
     bool got = session.read_any(key, ch, tick);
     for (int i = 0; got && i < kMaxKeysPerPass; ++i) {
-      if (key == term::Key::Resize) {
+      if (key == linedit::Key::Resize) {
         bar.resize();
-      } else if (key == term::Key::Paste) {
+      } else if (key == linedit::Key::Paste) {
         submit_paste(clipboard::text(), editor, shared, bar);
       } else {
-        const line::Outcome action = editor.feed(key, ch);
-        if (action == line::Outcome::Submitted) {
+        const linedit::Outcome action = editor.feed(key, ch);
+        if (action == linedit::Outcome::Submitted) {
           submit_line(editor, shared, bar);
-        } else if (action == line::Outcome::Interrupt && !interrupted) {
+        } else if (action == linedit::Outcome::Interrupt && !interrupted) {
           interrupted = true;
           {
             std::lock_guard<std::mutex> lock(shared.m);
@@ -188,7 +188,7 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
           shared.stop.store(true, std::memory_order_relaxed);
           if (shared.job != nullptr)
             TerminateJobObject(static_cast<HANDLE>(shared.job), 1);
-        } else if (action == line::Outcome::EndOfInput && !eof_sent) {
+        } else if (action == linedit::Outcome::EndOfInput && !eof_sent) {
           eof_sent = true;
           {
             std::lock_guard<std::mutex> lock(shared.m);
@@ -205,7 +205,7 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
           monitor::sample(shared.process, shared.job, shared.start);
       spinner.advance(watch.cpu_advanced(now));
       watch.update(now);
-      const term::Size size = session.size();
+      const linedit::Size size = session.size();
       bar.set_status(spinner.render(now.cpu_ms(),
                                     size.columns > 1 ? size.columns - 1 : 1));
     }

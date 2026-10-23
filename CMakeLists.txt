@@ -14,7 +14,6 @@ set(CORE_SOURCES
   src/base/color.cpp
   src/base/win_error.cpp
   src/base/hash.cpp
-  src/base/terminal.cpp
   src/base/path.cpp
   src/io/config.cpp
   src/io/source.cpp
@@ -30,9 +29,6 @@ set(CORE_SOURCES
   src/app/prompt.cpp
   src/app/stale_exe.cpp
   src/app/interactive_ui.cpp
-  src/app/console_bar.cpp
-  src/app/line_edit.cpp
-  src/app/status_line.cpp
   src/app/clipboard.cpp
 )
 
@@ -44,6 +40,9 @@ target_include_directories(coding_core PUBLIC
 )
 
 target_link_libraries(coding_core PUBLIC bcrypt)
+
+add_subdirectory(linedit)
+target_link_libraries(coding_core PUBLIC linedit_core)
 
 add_executable(cg_s src/main/main_single.cpp)
 add_executable(cg_i src/main/main_interactive.cpp)

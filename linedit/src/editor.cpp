@@ -1,9 +1,10 @@
-#include "app/line_edit.hpp"
+#include "linedit/editor.hpp"
 
 #include "base/text.hpp"
 
-namespace coding {
-namespace line {
+#include <algorithm>
+
+namespace linedit {
 
 namespace {
 
@@ -40,13 +41,13 @@ bool is_word_cp(char32_t c) {
 std::size_t step_word_forward(std::string_view s, std::size_t from) {
   std::size_t i = from;
   while (i < s.size()) {
-    const auto [cp, len] = text::decode_utf8(s, i);
+    const auto [cp, len] = coding::text::decode_utf8(s, i);
     if (is_word_cp(cp))
       break;
     i += len;
   }
   while (i < s.size()) {
-    const auto [cp, len] = text::decode_utf8(s, i);
+    const auto [cp, len] = coding::text::decode_utf8(s, i);
     if (!is_word_cp(cp))
       break;
     i += len;
@@ -58,14 +59,14 @@ std::size_t step_word_backward(std::string_view s, std::size_t from) {
   std::size_t i = from;
   while (i > 0) {
     const std::size_t prev = step_back(s, i);
-    const auto [cp, len] = text::decode_utf8(s, prev);
+    const auto [cp, len] = coding::text::decode_utf8(s, prev);
     if (is_word_cp(cp))
       break;
     i = prev;
   }
   while (i > 0) {
     const std::size_t prev = step_back(s, i);
-    const auto [cp, len] = text::decode_utf8(s, prev);
+    const auto [cp, len] = coding::text::decode_utf8(s, prev);
     if (!is_word_cp(cp))
       break;
     i = prev;
@@ -147,7 +148,8 @@ void Editor::insert_text(std::string_view text) {
 }
 
 std::size_t Editor::cursor_columns() const {
-  return text::display_width(std::string_view(buffer).substr(0, cursor));
+  return coding::text::display_width(
+      std::string_view(buffer).substr(0, cursor));
 }
 
 std::string clean_paste(std::string_view text) {
@@ -175,8 +177,8 @@ Layout layout_text(std::string_view text, std::size_t cursor_bytes,
     std::string row;
     std::size_t i = 0;
     while (i < line.size() && line[i] != '\n') {
-      const text::CharWidth w = text::measure(line, i);
-      if (w.bytes == 0 || text::display_width(row) + w.columns > limit)
+      const coding::text::CharWidth w = coding::text::measure(line, i);
+      if (w.bytes == 0 || coding::text::display_width(row) + w.columns > limit)
         break;
       row.append(line, i, w.bytes);
       i += w.bytes;
@@ -199,7 +201,7 @@ Layout layout_text(std::string_view text, std::size_t cursor_bytes,
       out.caret_row = out.rows.size() - 1;
       const std::size_t taken =
           std::min(cursor_at - row_start, out.rows.back().size());
-      out.caret_column = text::display_width(
+      out.caret_column = coding::text::display_width(
           std::string_view(out.rows.back()).substr(0, taken));
       caret_done = true;
     }
@@ -212,55 +214,55 @@ Layout layout_text(std::string_view text, std::size_t cursor_bytes,
 
   if (!caret_done) {
     out.caret_row = out.rows.size() - 1;
-    out.caret_column = text::display_width(out.rows.back());
+    out.caret_column = coding::text::display_width(out.rows.back());
   }
   return out;
 }
-Outcome Editor::feed(term::Key key, char32_t ch) {
+
+Outcome Editor::feed(Key key, char32_t ch) {
   switch (key) {
-  case term::Key::Text:
+  case Key::Text:
     if (ch >= 0x20 && ch != 0x7F) {
       _insert(ch);
       return Outcome::Edited;
     }
     return Outcome::None;
-  case term::Key::ShiftEnter:
+  case Key::ShiftEnter:
     _insert('\n');
     return Outcome::Edited;
-  case term::Key::Backspace:
+  case Key::Backspace:
     _backspace();
     return Outcome::Edited;
-  case term::Key::Delete:
+  case Key::Delete:
     _delete();
     return Outcome::Edited;
-  case term::Key::WordBackspace:
+  case Key::WordBackspace:
     _word_backspace();
     return Outcome::Edited;
-  case term::Key::WordDelete:
+  case Key::WordDelete:
     _word_delete();
     return Outcome::Edited;
-  case term::Key::Left:
+  case Key::Left:
     _move_left();
     return Outcome::Edited;
-  case term::Key::Right:
+  case Key::Right:
     _move_right();
     return Outcome::Edited;
-  case term::Key::WordLeft:
+  case Key::WordLeft:
     _move_word_left();
     return Outcome::Edited;
-  case term::Key::WordRight:
+  case Key::WordRight:
     _move_word_right();
     return Outcome::Edited;
-  case term::Key::Enter:
+  case Key::Enter:
     return Outcome::Submitted;
-  case term::Key::Quit:
+  case Key::Quit:
     return Outcome::Interrupt;
-  case term::Key::EndOfInput:
+  case Key::EndOfInput:
     return buffer.empty() ? Outcome::EndOfInput : Outcome::None;
   default:
     return Outcome::None;
   }
 }
 
-} // namespace line
-} // namespace coding
+} // namespace linedit

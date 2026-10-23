@@ -11,6 +11,17 @@
 | `cg_s` | 编译一次，用 `[io].single_input` 作为输入 |
 | `cg_t` | 后台常驻，按全局热键触发上面两者          |
 
+## 交互模式的编辑器
+
+`cg_i` 的行编辑器在 [`linedit/`](linedit/) 里，和「编译什么、跑什么、怎么计时」完全分开：
+
+- `Editor` 只管缓冲区和光标，返回 `Outcome`（提交 / 中断 / 输入结束）让调用方决定怎么办；
+- `Bar` 只管把「程序输出往上滚、输入行和状态行钉在下面两行」画出来，不认识编辑器；
+- 只有 `Session` 碰 Win32 控制台。
+
+它往下只依赖 `base/text.hpp`（UTF-8 解码与显示宽度）和 `base/win_error.hpp`，
+细节见 [`linedit/README.md`](linedit/README.md)。
+
 ## 构建
 
 ```sh

@@ -1,8 +1,9 @@
-#include "app/status_line.hpp"
+#include "linedit/status_line.hpp"
 
 #include "base/text.hpp"
 
-namespace coding {
+namespace linedit {
+
 namespace status {
 
 bool Line::advance(bool cpu_active) noexcept {
@@ -21,14 +22,14 @@ std::string Line::render(std::chrono::milliseconds cpu,
   std::string text =
       "[" + frame_text() + "] cpu " + std::to_string(cpu.count()) + " ms";
 
-  if (width == 0 || text::display_width(text) <= width)
+  if (width == 0 || coding::text::display_width(text) <= width)
     return text;
 
   std::string cut;
   std::size_t i = 0;
   while (i < text.size()) {
-    const text::CharWidth w = text::measure(text, i);
-    if (w.bytes == 0 || text::display_width(cut) + w.columns > width)
+    const coding::text::CharWidth w = coding::text::measure(text, i);
+    if (w.bytes == 0 || coding::text::display_width(cut) + w.columns > width)
       break;
     cut.append(text, i, w.bytes);
     i += w.bytes;
@@ -37,4 +38,4 @@ std::string Line::render(std::chrono::milliseconds cpu,
 }
 
 } // namespace status
-} // namespace coding
+} // namespace linedit

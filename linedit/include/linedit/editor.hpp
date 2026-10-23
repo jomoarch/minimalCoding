@@ -1,16 +1,13 @@
-#ifndef LINE_EDIT_HPP
-#define LINE_EDIT_HPP
+#ifndef LINEDIT_EDITOR_HPP
+#define LINEDIT_EDITOR_HPP
 
-#include "base/terminal.hpp"
+#include "linedit/key.hpp"
 
 #include <cstddef>
 #include <string>
 #include <string_view>
 #include <vector>
-
-namespace coding {
-
-namespace line {
+namespace linedit {
 
 enum class Outcome { None, Edited, Submitted, Interrupt, EndOfInput };
 
@@ -18,7 +15,7 @@ struct Editor {
   std::string buffer;
   std::size_t cursor{0};
 
-  Outcome feed(term::Key key, char32_t ch);
+  Outcome feed(Key key, char32_t ch);
 
   void insert_text(std::string_view text);
 
@@ -56,7 +53,6 @@ struct Layout {
 Layout layout_text(std::string_view text, std::size_t cursor_bytes,
                    std::size_t first_room, std::size_t room);
 
-} // namespace line
-} // namespace coding
+} // namespace linedit
 
-#endif // LINE_EDIT_HPP
+#endif // LINEDIT_EDITOR_HPP

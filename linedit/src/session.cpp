@@ -1,4 +1,4 @@
-#include "base/terminal.hpp"
+#include "linedit/session.hpp"
 
 #include "base/win_error.hpp"
 
@@ -6,9 +6,7 @@
 
 #include <algorithm>
 #include <string>
-namespace coding {
-
-namespace term {
+namespace linedit {
 
 namespace {
 
@@ -87,8 +85,8 @@ bool Session::open(Session &out, std::string &error, Screen screen) {
   const DWORD new_out = out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
 
   if (!SetConsoleMode(in, new_in) || !SetConsoleMode(os, new_out)) {
-    error =
-        "cannot switch the console to raw mode: " + win::last_error_string();
+    error = "cannot switch the console to raw mode: " +
+            coding::win::last_error_string();
     return false;
   }
   SetConsoleOutputCP(CP_UTF8);
@@ -246,5 +244,4 @@ bool Session::read_key(Key &out, bool raw, char32_t *text,
   }
 }
 
-} // namespace term
-} // namespace coding
+} // namespace linedit
