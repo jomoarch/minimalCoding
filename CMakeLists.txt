@@ -50,7 +50,10 @@ add_executable(cg_i src/main/main_interactive.cpp)
 
 add_executable(cg_t
   src/main/main_daemon.cpp
-  src/app/daemon.cpp
+  src/daemon/daemon.cpp
+  src/daemon/daemon_status.cpp
+  src/daemon/hotkey_service.cpp
+  src/daemon/job_launcher.cpp
 )
 
 foreach(app cg_s cg_i cg_t)
