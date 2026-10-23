@@ -172,7 +172,7 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run,
     case RunnerStatus::MemoryLimitExceeded:
       return color::err("Memory Limit Exceeded");
     case RunnerStatus::RuntimeError:
-      return color::err("Runtime Rrror");
+      return color::err("Runtime Error");
     default:
       return color::warn(run.result.message);
     }
@@ -188,6 +188,15 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run,
   std::string out = oss.str();
   const std::size_t w = color::visible_width(out);
   std::cout << '\n' << std::string(w, '-') << '\n' << out << '\n';
+
+  if (run.result.status == RunnerStatus::RuntimeError) {
+    if (run.result.message.empty())
+      std::cout << color::err("[runtime] ")
+                << "the program exited abnormally\n";
+    else
+      std::cout << color::err("[runtime] ") << color::err(run.result.message)
+                << '\n';
+  }
 
   if (cfg.single_output.empty()) {
     std::cout << "[save] [io].single_output is not configured, nothing saved\n";
