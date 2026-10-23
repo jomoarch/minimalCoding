@@ -321,6 +321,13 @@ ConfigResult load_config(const std::filesystem::path &path) {
     read_field(t, "colorize_output", c.colorize_output);
   });
 
+  // [daemon]
+  read_section(tbl, "daemon", [&](const toml::table &t) {
+    read_field(t, "interactive", c.hotkey_interactive);
+    read_field(t, "single", c.hotkey_single);
+    read_field(t, "quit", c.hotkey_quit);
+  });
+
   const std::filesystem::path config_dir =
       compress_path(config, false, true).parent_path();
   std::string raw_base;

@@ -9,6 +9,7 @@
 | ------ | ----------------------------------------- |
 | `cg_i` | 编译一次后直接再控制台交互运行            |
 | `cg_s` | 编译一次，用 `[io].single_input` 作为输入 |
+| `cg_t` | 后台常驻，按全局热键触发上面两者          |
 
 ## 构建
 
@@ -128,6 +129,44 @@ cmake --build build --config Release
 - 只在**运行时**显示，进程结束后擦掉；`s` / `b` 模式没有这一行。
 - 为了把两行钉在输入行下面，`cg_i` 会**接管控制台的输入**。不是控制台时自动退回原来的行为，退出码不变。
 
+## 热键守护进程：cg_t
+
+`cg_t` 常驻后台，按全局热键触发一次 `cg_i` / `cg_s` 的运行。
+
+### 用法
+
+```sh
+cg_t
+cg_t --status
+cg_t --stop
+```
+
+默认热键：`Ctrl+Alt+I` 交互模式、`Ctrl+Alt+S` 单文件模式、`Ctrl+Alt+Q` 退出。
+
+### 热键冲突
+
+`Ctrl+Alt+字母` 是很抢手的组合，输入法、显卡驱动、厂商工具都可能已经占着。注册失败不会静默：
+
+```
+[daemon] cannot register Ctrl+Alt+I for interactive: already taken by another program
+```
+
+改 `config.toml` 的 `[daemon]` 段即可，留空字符串表示关掉那个热键。**改完跑一次 `cg_t --status`**，它会逐个列出注册结果（包括失败原因）；启动就失败的情况下这份状态也会保留，`--status` 会以 `last run:` 标出。
+
+键名写法：`Ctrl`/`Control`、`Alt`、`Shift`、`Win`/`Super`，键可以写 `A`-`Z`、`0`-`9`、`F1`-`F24` 以及 `Space`/`Tab`/`Left`/`Home`/`PageUp` 这类具名键。**必须带至少一个修饰键**，裸键会被拒绝（那等于全局劫持打字）。
+
+### 退出
+
+三条独立的路，任意一条失效都还有别的：
+
+| 方式            | 说明                       |
+| --------------- | -------------------------- |
+| `Ctrl+Alt+Q`    | 退出热键，默认值，可改可关 |
+| `cg_t --stop`   | 给命名事件发信号，可脚本化 |
+| 控制台 `Ctrl+C` | 前台手动启动时有效         |
+
+退出时会**注销热键、清理状态文件**，但**不会杀**正在跑的任务——用户按热键拉起来的程序不该因为守护进程退出就消失。
+
 ## 配置
 
 复制仓库里的 `config.toml` 改一份自己的，**所有键都是可选的**。
@@ -178,5 +217,8 @@ bin/config.link  ->  ../shared/team.link  ->  C:/path/config.toml
 | `[io].colorize_output`     | 是否给程序自身输出染色（默认 `true`）                                                   |
 | `[io].merge_stderr`        | 是否把 stderr 也写进输出文件；不写就各自维持现状（见上文「stderr 要不要进输出文件」）   |
 | `[io].print_input`         | 回显时是否先把输入打出来；默认 `false`                                                  |
+| `[daemon].interactive`     | `cg_t` 触发交互模式的热键，默认 `Ctrl+Alt+I`；留空关掉                                  |
+| `[daemon].single`          | `cg_t` 触发单文件模式的热键，默认 `Ctrl+Alt+S`；留空关掉                                |
+| `[daemon].quit`            | `cg_t` 退出热键，默认 `Ctrl+Alt+Q`；留空关掉                                            |
 
 可执行文件、运行目录与缓存表都由程序在 `<base>/.coding/` 下生成，**不能**再用配置指定；旧配置里的 `[compiler].output`、`[compiler].output_probe`、`[runner].work_dir` 会被忽略。

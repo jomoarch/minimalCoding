@@ -21,3 +21,8 @@ single_output = "output"
 merge_stderr = false
 print_input = false
 colorize_output = true
+
+[daemon]
+interactive = "Ctrl+Alt+I"
+single = "Ctrl+Alt+S"
+quit = "Ctrl+Alt+Q"

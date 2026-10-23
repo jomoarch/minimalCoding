@@ -6,6 +6,7 @@ namespace app {
 
 int run_single();
 int run_interactive();
+int run_daemon(int argc, char **argv);
 
 } // namespace app
 } // namespace coding

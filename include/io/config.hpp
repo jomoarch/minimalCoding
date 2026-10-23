@@ -42,6 +42,11 @@ struct AppConfig {
 
   // build
   bool force_rebuild{false};
+
+  // daemon
+  std::string hotkey_interactive{"Ctrl+Alt+I"};
+  std::string hotkey_single{"Ctrl+Alt+S"};
+  std::string hotkey_quit{"Ctrl+Alt+Q"};
 };
 
 struct ConfigResult : ResultBase {

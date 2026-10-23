@@ -18,6 +18,7 @@ set(CORE_SOURCES
   src/base/path.cpp
   src/io/config.cpp
   src/io/source.cpp
+  src/io/hotkey.cpp
   src/process/accounting.cpp
   src/process/compiler.cpp
   src/process/runner_single.cpp
@@ -47,7 +48,12 @@ target_link_libraries(coding_core PUBLIC bcrypt)
 add_executable(cg_s src/main/main_single.cpp)
 add_executable(cg_i src/main/main_interactive.cpp)
 
-foreach(app cg_s cg_i)
+add_executable(cg_t
+  src/main/main_daemon.cpp
+  src/app/daemon.cpp
+)
+
+foreach(app cg_s cg_i cg_t)
   target_link_libraries(${app} PRIVATE coding_core)
   set_target_properties(${app} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin
@@ -56,6 +62,8 @@ endforeach()
 
 if(MSVC)
   target_compile_options(coding_core PRIVATE /W4 /permissive-)
+  target_compile_options(cg_t PRIVATE /W4 /permissive-)
 else()
   target_compile_options(coding_core PRIVATE -Wall -Wextra)
+  target_compile_options(cg_t PRIVATE -Wall -Wextra)
 endif()
