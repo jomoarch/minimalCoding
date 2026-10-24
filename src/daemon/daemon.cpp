@@ -163,7 +163,7 @@ int run_service() {
   }
 
   std::cout << color::ok("[cg_t] daemon started") << " (pid "
-            << ::GetCurrentProcessId() << ")\n";
+            << color::info(::GetCurrentProcessId()) << ")\n";
   std::cout << "[cg_t] config: " << show_path(cfg.config_path) << "\n";
   for (const HotkeySlot &slot : slots) {
     if (!slot.registered)
