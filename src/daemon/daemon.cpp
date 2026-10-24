@@ -7,9 +7,14 @@
 
 #include "app/app.hpp"
 
+#include "app/modes.hpp"
+#include "app/program_hook.hpp"
+#include "daemon/daemon_log.hpp"
 #include "daemon/daemon_status.hpp"
+#include "daemon/focus_window.hpp"
 #include "daemon/hotkey_service.hpp"
 #include "daemon/job_launcher.hpp"
+#include "daemon/slot_report.hpp"
 #include "base/color.hpp"
 #include "base/path.hpp"
 #include "io/config.hpp"
@@ -20,6 +25,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace coding {
@@ -30,6 +36,15 @@ namespace {
 constexpr int kHotkeyInteractive = 1;
 constexpr int kHotkeySingle = 2;
 constexpr int kHotkeyQuit = 3;
+
+constexpr UINT_PTR kTagJobI = 1;
+constexpr UINT_PTR kTagJobS = 2;
+constexpr UINT_PTR kTagSignalI = 3;
+constexpr UINT_PTR kTagSignalS = 4;
+
+const char *describe(Job job) {
+  return job == Job::Interactive ? "interactive" : "single";
+}
 
 void usage() {
   std::cout
@@ -46,7 +61,9 @@ void usage() {
          "hotkeys (see [daemon] in config.toml):\n"
          "  interactive  default Ctrl+Alt+I\n"
          "  single       default Ctrl+Alt+S\n"
-         "  quit         default Ctrl+Alt+Q   (empty value disables a key)\n";
+         "  quit         default Ctrl+Alt+Q   (empty value disables a key)\n"
+         "\n"
+         "process log goes to stdout and <base>/.coding/daemon.log\n";
 }
 
 bool resolve_slots(const AppConfig &cfg, std::vector<HotkeySlot> &slots,
@@ -89,6 +106,24 @@ bool resolve_slots(const AppConfig &cfg, std::vector<HotkeySlot> &slots,
   return true;
 }
 
+int run_job(Job job) {
+  SlotPublisher publisher;
+  publisher.open(job);
+  publisher.publish_job(
+      ::GetCurrentProcessId(),
+      reinterpret_cast<unsigned long long>(::GetConsoleWindow()));
+
+  set_program_started_hook(
+      [&publisher](unsigned long pid) { publisher.publish_program(pid); });
+
+  const ModeOutcome outcome =
+      job == Job::Interactive ? run_interactive() : run_single();
+
+  publisher.publish_done(static_cast<unsigned long>(outcome.code),
+                         outcome.saved_input, outcome.saved_output);
+  return outcome.code;
+}
+
 int run_service() {
   std::string error;
 
@@ -121,6 +156,13 @@ int run_service() {
 
   JobLauncher launcher;
   if (!launcher.open(error)) {
+    std::cerr << color::err("[cg_t] ", error) << "\n";
+    release_singleton();
+    return 2;
+  }
+
+  SlotBoard board;
+  if (!board.open(error)) {
     std::cerr << color::err("[cg_t] ", error) << "\n";
     release_singleton();
     return 2;
@@ -162,6 +204,9 @@ int run_service() {
     return 2;
   }
 
+  DaemonLog log;
+  log.open(cfg.coding_dir / "daemon.log");
+
   std::cout << color::ok("[cg_t] daemon started") << " (pid "
             << color::info(::GetCurrentProcessId()) << ")\n";
   std::cout << "[cg_t] config: " << show_path(cfg.config_path) << "\n";
@@ -175,6 +220,18 @@ int run_service() {
             << std::flush;
 
   write_status(cfg, slots);
+  log.write("daemon: started (pid " + std::to_string(::GetCurrentProcessId()) +
+            ")");
+
+  unsigned long long logged_program[kJobCount]{0, 0};
+
+  const auto focus_running = [&](Job job) {
+    const SlotReport report = board.read(job);
+    const bool focused = focus_window(report.hwnd);
+    log.write(std::string(describe(job)) + ": already running (pid " +
+              std::to_string(launcher.pid(job)) + "), " +
+              (focused ? "focused" : "could not raise window"));
+  };
 
   const auto on_hotkey = [&](int id) {
     if (id == kHotkeyQuit) {
@@ -183,37 +240,98 @@ int run_service() {
     }
 
     const Job job = id == kHotkeySingle ? Job::Single : Job::Interactive;
+
+    if (launcher.busy(job)) {
+      focus_running(job);
+      return;
+    }
+
+    board.reset(job);
+    logged_program[static_cast<int>(job)] = 0;
+
     std::string why;
-    switch (launcher.launch(job, why)) {
+    unsigned long long pid = 0;
+    switch (launcher.launch(job, &pid, why)) {
     case LaunchResult::Started:
+      log.write(std::string(describe(job)) + ": job started (pid " +
+                std::to_string(pid) + ")");
       break;
     case LaunchResult::Busy:
-      ::Beep(880, 40);
+      focus_running(job);
       break;
     case LaunchResult::Failed:
-      std::cerr << color::err("[cg_t] cannot start job: ", why) << "\n";
+      log.write(std::string(describe(job)) + ": cannot start job: " + why);
       break;
     }
   };
 
-  const auto slot_handles = [&]() {
-    std::vector<HANDLE> handles;
-    handles.reserve(kJobCount);
-    for (int i = 0; i < kJobCount; ++i)
-      handles.push_back(launcher.handle(static_cast<Job>(i)));
-    return handles;
+  const auto waits = [&]() {
+    std::vector<std::pair<UINT_PTR, HANDLE>> items;
+    items.emplace_back(kTagJobI, launcher.handle(Job::Interactive));
+    items.emplace_back(kTagJobS, launcher.handle(Job::Single));
+    items.emplace_back(kTagSignalI, board.signal(Job::Interactive));
+    items.emplace_back(kTagSignalS, board.signal(Job::Single));
+    return items;
   };
 
-  const auto on_slot_done = [&](std::size_t slot) {
-    if (slot < static_cast<std::size_t>(kJobCount))
-      launcher.reap(static_cast<Job>(slot));
+  const auto on_wake = [&](UINT_PTR tag) {
+    const bool is_job = tag == kTagJobI || tag == kTagJobS;
+    const Job job = (tag == kTagJobI || tag == kTagSignalI) ? Job::Interactive
+                                                            : Job::Single;
+    const int index = static_cast<int>(job);
+
+    const SlotReport report = board.read(job);
+    const unsigned long long expected = launcher.pid(job);
+
+    if (!is_job) {
+
+      if (expected == 0 || report.job_pid != expected)
+        return;
+      if ((report.flags & kSlotHasProgram) != 0 && report.program_pid != 0 &&
+          report.program_pid != logged_program[index]) {
+        logged_program[index] = report.program_pid;
+        log.write(std::string(describe(job)) + ": program started (pid " +
+                  std::to_string(report.program_pid) + ")");
+      }
+      return;
+    }
+
+    unsigned long exit_code = 0;
+    if (const HANDLE handle = launcher.handle(job); handle != nullptr)
+      ::GetExitCodeProcess(handle, &exit_code);
+
+    std::string line = std::string(describe(job)) + ": job finished (exit " +
+                       std::to_string(exit_code);
+
+    const bool reported =
+        (report.flags & kSlotDone) != 0 && report.job_pid == expected;
+    if (!reported) {
+
+      line += ", no report)";
+    } else {
+      line += ')';
+      if (job == Job::Interactive) {
+        line += " input saved: ";
+        line += (report.flags & kSlotSavedInput) != 0 ? "yes" : "no";
+        line += ", output saved: ";
+        line += (report.flags & kSlotSavedOutput) != 0 ? "yes" : "no";
+      } else {
+        line += " output saved: ";
+        line += (report.flags & kSlotSavedOutput) != 0 ? "yes" : "no";
+      }
+    }
+
+    log.write(line);
+    logged_program[index] = 0;
+    launcher.reap(job);
   };
 
-  if (!keys.run(on_hotkey, slot_handles, on_slot_done, error))
+  if (!keys.run(on_hotkey, waits, on_wake, error))
     std::cerr << color::err("[cg_t] ", error) << "\n";
 
   launcher.reap_all();
   remove_status(cfg);
+  log.write("daemon: stopped");
   std::cout << color::info("[cg_t] stopped") << "\n";
   release_singleton();
   return 0;
@@ -258,9 +376,9 @@ int run_daemon(int argc, char **argv) {
       }
       const std::string_view mode = argv[++i];
       if (mode == "i")
-        return ::coding::app::run_interactive();
+        return run_job(Job::Interactive);
       if (mode == "s")
-        return ::coding::app::run_single();
+        return run_job(Job::Single);
       std::cerr << "[cg_t] unknown job \"" << std::string(mode) << "\"\n";
       return 2;
     }

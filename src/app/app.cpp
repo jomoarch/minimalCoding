@@ -1,6 +1,5 @@
 #include "app/app.hpp"
 
-#include "app/modes.hpp"
 #include "app/prompt.hpp"
 #include "base/color.hpp"
 #include "io/config.hpp"
@@ -26,33 +25,33 @@ bool load(AppConfig &out) {
   return true;
 }
 
-int settle(const ModeOutcome &outcome) {
+ModeOutcome settle(const ModeOutcome &outcome) {
   if (outcome.wait_key) {
     if (prompt::interactive_stdin())
       prompt::wait_any_key();
   } else {
     prompt::pause_if_needed(-1);
   }
-  return outcome.code;
+  return outcome;
 }
 
 } // namespace
 
-int run_single() {
+ModeOutcome run_single() {
   use_utf8_console();
   color::install();
   AppConfig cfg;
   if (!load(cfg))
-    return 2;
+    return ModeOutcome{2, false, false, false};
   return settle(run_single_file(cfg));
 }
 
-int run_interactive() {
+ModeOutcome run_interactive() {
   use_utf8_console();
   color::install();
   AppConfig cfg;
   if (!load(cfg))
-    return 2;
+    return ModeOutcome{2, false, false, false};
   return settle(run_interactive(cfg));
 }
 

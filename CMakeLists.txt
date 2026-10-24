@@ -30,6 +30,7 @@ set(CORE_SOURCES
   src/app/stale_exe.cpp
   src/app/interactive_ui.cpp
   src/app/clipboard.cpp
+  src/app/program_hook.cpp
 )
 
 add_library(coding_core STATIC ${CORE_SOURCES})
@@ -50,9 +51,12 @@ add_executable(cg_i src/main/main_interactive.cpp)
 add_executable(cg_t
   src/main/main_daemon.cpp
   src/daemon/daemon.cpp
+  src/daemon/daemon_log.cpp
   src/daemon/daemon_status.cpp
+  src/daemon/focus_window.cpp
   src/daemon/hotkey_service.cpp
   src/daemon/job_launcher.cpp
+  src/daemon/slot_report.cpp
 )
 
 foreach(app cg_s cg_i cg_t)

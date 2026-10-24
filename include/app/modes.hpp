@@ -8,6 +8,9 @@ struct ModeOutcome {
   int code{0};
 
   bool wait_key{false};
+
+  bool saved_input{false};
+  bool saved_output{false};
 };
 
 ModeOutcome run_interactive(const AppConfig &cfg);

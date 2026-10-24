@@ -1,6 +1,7 @@
 #include "app/interactive_ui.hpp"
 
 #include "app/clipboard.hpp"
+#include "app/program_hook.hpp"
 #include "base/color.hpp"
 #include "linedit/bar.hpp"
 #include "linedit/editor.hpp"
@@ -105,6 +106,7 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
   opt.stdin_from_console = false;
 
   opt.on_started = [&shared](void *process, void *job) {
+    app::report_program_started(process);
     shared.process = process;
     shared.job = job;
     shared.start = std::chrono::steady_clock::now();

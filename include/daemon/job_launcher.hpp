@@ -31,9 +31,11 @@ public:
 
   bool busy(Job job) const;
 
-  LaunchResult launch(Job job, std::string &error);
+  LaunchResult launch(Job job, unsigned long long *pid, std::string &error);
 
   HANDLE handle(Job job) const;
+
+  unsigned long long pid(Job job) const;
 
   void reap(Job job) noexcept;
 
@@ -42,6 +44,7 @@ public:
 private:
   std::wstring exe_;
   HANDLE jobs_[kJobCount]{nullptr, nullptr};
+  unsigned long long pids_[kJobCount]{0, 0};
 };
 
 } // namespace app

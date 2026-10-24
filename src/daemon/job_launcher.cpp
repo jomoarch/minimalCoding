@@ -52,7 +52,12 @@ HANDLE JobLauncher::handle(Job job) const {
   return jobs_[static_cast<int>(job)];
 }
 
-LaunchResult JobLauncher::launch(Job job, std::string &error) {
+unsigned long long JobLauncher::pid(Job job) const {
+  return pids_[static_cast<int>(job)];
+}
+
+LaunchResult JobLauncher::launch(Job job, unsigned long long *pid,
+                                 std::string &error) {
   if (busy(job))
     return LaunchResult::Busy;
   reap(job);
@@ -76,6 +81,9 @@ LaunchResult JobLauncher::launch(Job job, std::string &error) {
 
   ::CloseHandle(info.hThread);
   jobs_[static_cast<int>(job)] = info.hProcess;
+  pids_[static_cast<int>(job)] = info.dwProcessId;
+  if (pid != nullptr)
+    *pid = info.dwProcessId;
   return LaunchResult::Started;
 }
 
@@ -85,6 +93,7 @@ void JobLauncher::reap(Job job) noexcept {
     ::CloseHandle(handle);
     handle = nullptr;
   }
+  pids_[static_cast<int>(job)] = 0;
 }
 
 void JobLauncher::reap_all() noexcept {

@@ -2,6 +2,7 @@
 
 #include "app/builder.hpp"
 #include "app/interactive_ui.hpp"
+#include "app/program_hook.hpp"
 #include "app/prompt.hpp"
 #include "base/color.hpp"
 #include "base/path.hpp"
@@ -158,8 +159,10 @@ std::string format_memory(std::size_t bytes) {
   return oss.str();
 }
 
-int finish_single(const AppConfig &cfg, const SingleRunResult &run,
-                  bool is_interactive) {
+ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
+                          bool is_interactive) {
+  ModeOutcome out;
+
   if (!run.warning.empty())
     std::cerr << color::warn("[probe] ", run.warning) << "\n";
 
@@ -185,9 +188,9 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run,
       << bg(std::to_string(run.result.wall_time.count()) + " ms") << " mem "
       << bg(format_memory(run.result.memory_bytes)) << "  " << status();
 
-  std::string out = oss.str();
-  const std::size_t w = color::visible_width(out);
-  std::cout << '\n' << std::string(w, '-') << '\n' << out << '\n';
+  std::string line = oss.str();
+  const std::size_t w = color::visible_width(line);
+  std::cout << '\n' << std::string(w, '-') << '\n' << line << '\n';
 
   if (run.result.status == RunnerStatus::RuntimeError) {
     if (run.result.message.empty())
@@ -205,15 +208,19 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run,
       std::cout << color::ok("[save] saved ", run.captured.size(),
                              " byte(s) -> ", cfg.single_output)
                 << "\n";
+      out.saved_output = true;
     } else {
       std::cerr << color::err("[save] Failed to write ", cfg.single_output)
                 << "\n";
-      return 2;
+      out.code = 2;
+      return out;
     }
   }
 
-  if (!is_interactive)
-    return run.result.status == RunnerStatus::Success ? 0 : 1;
+  if (!is_interactive) {
+    out.code = run.result.status == RunnerStatus::Success ? 0 : 1;
+    return out;
+  }
   if (run.user_input.empty()) {
     std::cout << "[save] your input is empty, nothing saved\n";
   } else if (prompt::ask_save(cfg.single_input, "input")) {
@@ -221,14 +228,17 @@ int finish_single(const AppConfig &cfg, const SingleRunResult &run,
       std::cout << color::ok("[save] saved ", run.user_input.size(),
                              " byte(s) -> ", cfg.single_input)
                 << "\n";
+      out.saved_input = true;
     } else {
       std::cerr << color::err("[save] Failed to write ", cfg.single_input)
                 << "\n";
-      return 2;
+      out.code = 2;
+      return out;
     }
   }
 
-  return run.result.status == RunnerStatus::Success ? 0 : 1;
+  out.code = run.result.status == RunnerStatus::Success ? 0 : 1;
+  return out;
 }
 
 } // namespace
@@ -272,12 +282,19 @@ ModeOutcome run_interactive(const AppConfig &cfg) {
   opt.time_limit_ms = cfg.time_limit;
   opt.memory_limit_bytes = cfg.memory_limit_bytes;
 
+  opt.on_started = [](void *process, void *) {
+    app::report_program_started(process);
+  };
+
   SingleRunResult run;
   if (!cfg.status_line || !interactive::run(cfg, opt, run)) {
     opt.stdin_from_console = true;
     run = run_single(opt);
   }
-  out.code = finish_single(cfg, run, true);
+  const ModeOutcome finished = finish_single(cfg, run, true);
+  out.code = finished.code;
+  out.saved_input = finished.saved_input;
+  out.saved_output = finished.saved_output;
   return out;
 }
 
@@ -351,7 +368,14 @@ ModeOutcome run_single_file(const AppConfig &cfg) {
   opt.time_limit_ms = cfg.time_limit;
   opt.memory_limit_bytes = cfg.memory_limit_bytes;
 
-  out.code = finish_single(cfg, run_single(opt), false);
+  opt.on_started = [](void *process, void *) {
+    app::report_program_started(process);
+  };
+
+  const ModeOutcome finished = finish_single(cfg, run_single(opt), false);
+  out.code = finished.code;
+  out.saved_input = finished.saved_input;
+  out.saved_output = finished.saved_output;
   return out;
 }
 

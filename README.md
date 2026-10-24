@@ -166,6 +166,38 @@ cg_t --stop
 
 键名写法：`Ctrl`/`Control`、`Alt`、`Shift`、`Win`/`Super`，键可以写 `A`-`Z`、`0`-`9`、`F1`-`F24` 以及 `Space`/`Tab`/`Left`/`Home`/`PageUp` 这类具名键。**必须带至少一个修饰键**，裸键会被拒绝（那等于全局劫持打字）。
 
+### 进程日志
+
+守护进程把「某次任务起了 / 它编译出来的程序起了 / 任务结束了」按日志式追加到
+**stdout** 和 **`<base>/.coding/daemon.log`** 两处（后者是隐藏启动时唯一能查的）。
+每行带本地时间戳：
+
+```
+[2026-10-24 15:25:41] daemon: started (pid 15736)
+[2026-10-24 15:25:42] single: job started (pid 13952)
+[2026-10-24 15:25:44] single: program started (pid 11996)
+[2026-10-24 15:25:46] single: job finished (exit 0) output saved: no
+[2026-10-24 15:25:58] interactive: job started (pid 13012)
+[2026-10-24 15:25:58] interactive: program started (pid 16172)
+[2026-10-24 15:26:03] interactive: already running (pid 13012), focused
+[2026-10-24 15:26:17] interactive: job finished (exit 1) input saved: no, output saved: no
+```
+
+- `job` 是任务进程（`cg_t.exe --job i|s`），`program` 是它编译出来的那个程序 ——
+  后者是孙进程，守护进程看不到，由任务进程通过一块共享内存报回来。
+- 结束行报告**是否真的写了输入/输出**（交互模式两者都报，单文件模式只报输出）。
+  如果任务是被强杀或没来得及报告，会写 `no report`。
+- 日志超过 512 KB 会在下次启动时清空。
+
+### 重复按同一个热键：聚焦而不是再开一个
+
+同一模式已经在跑时，再按热键不会启动第二个（两次 `cg` 会抢同一个 exe 和同一份
+构建缓存），而是把**已经在跑的那个窗口拉到前台**。
+
+实现上：任务进程启动时把自己的控制台窗口句柄写进槽位共享内存，守护进程按需读取。
+之所以要这样绕，是因为 `CREATE_NEW_CONSOLE` 建出来的窗口属于 `conhost.exe`，
+按 PID 找不到它 —— 详见 [`src/daemon/focus_window.cpp`](src/daemon/focus_window.cpp)。
+
 ### 退出
 
 三条独立的路，任意一条失效都还有别的：
@@ -177,6 +209,20 @@ cg_t --stop
 | 控制台 `Ctrl+C` | 前台手动启动时有效         |
 
 退出时会**注销热键、清理状态文件**，但**不会杀**正在跑的任务——用户按热键拉起来的程序不该因为守护进程退出就消失。
+
+### 已知限制：一个会话只能有一个守护进程
+
+单实例互斥体、停止事件、槽位共享内存用的都是 `Local\minimalCoding.cg_t.*`，
+**不区分项目目录**。所以：
+
+- 同一会话里第二个 `cg_t` 会说 `already running` 然后退出，即使它指向另一份
+  `config.toml`；
+- 如果已经在跑的那个是**提权**启动的，非提权的 `cg_t --stop` 会失败
+  （`OpenEvent` 被拒绝），只能从任务管理器结束。
+
+要同时守护多个项目，需要把命名空间改成按配置路径派生（比如拼上 `config.toml`
+的哈希）。
+
 
 ## 配置
 

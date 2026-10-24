@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 namespace coding {
 namespace app {
@@ -41,11 +42,11 @@ public:
 
   using HotkeyFn = std::function<void(int id)>;
 
-  using SlotsFn = std::function<std::vector<HANDLE>()>;
-  using SlotDoneFn = std::function<void(std::size_t slot)>;
+  using WaitsFn = std::function<std::vector<std::pair<UINT_PTR, HANDLE>>()>;
+  using WakeFn = std::function<void(UINT_PTR tag)>;
 
-  bool run(const HotkeyFn &on_hotkey, const SlotsFn &slots,
-           const SlotDoneFn &on_slot_done, std::string &error);
+  bool run(const HotkeyFn &on_hotkey, const WaitsFn &waits,
+           const WakeFn &on_wakeup, std::string &error);
 
   void request_stop() noexcept;
 

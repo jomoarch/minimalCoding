@@ -144,48 +144,42 @@ void HotkeyService::pump_messages() {
   }
 }
 
-bool HotkeyService::run(const HotkeyFn &on_hotkey, const SlotsFn &slots,
-                        const SlotDoneFn &on_slot_done, std::string &error) {
+bool HotkeyService::run(const HotkeyFn &on_hotkey, const WaitsFn &waits,
+                        const WakeFn &on_wakeup, std::string &error) {
   on_hotkey_ = on_hotkey;
 
   bool ok = true;
   for (;;) {
 
-    const std::vector<HANDLE> slot_handles = slots();
+    const std::vector<std::pair<UINT_PTR, HANDLE>> items = waits();
 
-    std::vector<HANDLE> waits;
-    waits.reserve(1 + slot_handles.size());
-    waits.push_back(stop_);
-    for (const HANDLE handle : slot_handles) {
-      if (handle != nullptr)
-        waits.push_back(handle);
+    std::vector<HANDLE> handles;
+    std::vector<UINT_PTR> tags;
+    handles.reserve(1 + items.size());
+    tags.reserve(items.size());
+    handles.push_back(stop_);
+    for (const auto &item : items) {
+      if (item.second == nullptr)
+        continue;
+      handles.push_back(item.second);
+      tags.push_back(item.first);
     }
 
-    const DWORD result =
-        ::MsgWaitForMultipleObjects(static_cast<DWORD>(waits.size()),
-                                    waits.data(), FALSE, INFINITE, QS_ALLINPUT);
+    const DWORD result = ::MsgWaitForMultipleObjects(
+        static_cast<DWORD>(handles.size()), handles.data(), FALSE, INFINITE,
+        QS_ALLINPUT);
 
     if (result == WAIT_OBJECT_0)
       break;
 
-    if (result > WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + waits.size()) {
+    if (result > WAIT_OBJECT_0 && result < WAIT_OBJECT_0 + handles.size()) {
       const std::size_t index = result - WAIT_OBJECT_0 - 1;
-
-      std::size_t seen = 0;
-      for (std::size_t slot = 0; slot < slot_handles.size(); ++slot) {
-        if (slot_handles[slot] == nullptr)
-          continue;
-        if (seen == index) {
-          if (on_slot_done)
-            on_slot_done(slot);
-          break;
-        }
-        ++seen;
-      }
+      if (index < tags.size() && on_wakeup)
+        on_wakeup(tags[index]);
       continue;
     }
 
-    if (result == WAIT_OBJECT_0 + waits.size()) {
+    if (result == WAIT_OBJECT_0 + handles.size()) {
       pump_messages();
       continue;
     }
