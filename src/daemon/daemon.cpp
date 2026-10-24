@@ -216,7 +216,8 @@ int run_service() {
     std::cout << "[cg_t] " << format_hotkey(slot.key) << " -> " << slot.label
               << "\n";
   }
-  std::cout << "[cg_t] press the quit hotkey, or run `cg_t --stop`\n"
+  std::cout << "[cg_t] press the quit hotkey, or run `cg_t --stop`\n";
+  std::cout << "==================================================\n"
             << std::flush;
 
   write_status(cfg, slots);
