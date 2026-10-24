@@ -1,3 +1,12 @@
+// Injected header: merges the program's stdout and stderr into one tagged byte
+// stream (0x01 = stdout, 0x02 = stderr, the tag is re-emitted only when the
+// stream switches).
+//
+// Known boundaries (deliberate):
+//  * wide-character output (std::wcout, wprintf) is not intercepted;
+//  * a stdout that was freopen'd elsewhere still writes to its original handle;
+//  * any other FILE* (fopen'd files) is forwarded untouched.
+
 #ifndef PROBE_H
 #define PROBE_H
 
@@ -19,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <streambuf>
 #include <string>
 
@@ -30,9 +40,11 @@ constexpr char kStderrTag = '\x02';
 namespace detail {
 
 constexpr std::size_t kBufSize = 64 * 1024;
+constexpr std::size_t kStackFmt = 4096;
 
 struct Sink {
   HANDLE handle;
+  std::mutex lock;
   char buf[kBufSize];
   std::size_t used;
   char current_tag;
@@ -41,29 +53,54 @@ struct Sink {
       : handle(::GetStdHandle(STD_OUTPUT_HANDLE)), used(0), current_tag(0) {}
 
   void flush() noexcept {
-    if (used == 0)
-      return;
-    DWORD written = 0;
-    ::WriteFile(handle, buf, static_cast<DWORD>(used), &written, nullptr);
-    used = 0;
-    current_tag = 0;
+    std::lock_guard<std::mutex> guard(lock);
+    flush_locked();
   }
 
   void push(char tag, const char *data, std::size_t n) noexcept {
+    std::lock_guard<std::mutex> guard(lock);
+    push_locked(tag, data, n);
+  }
+
+private:
+  void write_all(const char *data, std::size_t n) noexcept {
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+      return;
+    while (n > 0) {
+      const std::size_t chunk = n > (1u << 20) ? (1u << 20) : n;
+      DWORD written = 0;
+      if (::WriteFile(handle, data, static_cast<DWORD>(chunk), &written,
+                      nullptr) == FALSE ||
+          written == 0)
+        return;
+      data += written;
+      n -= written;
+    }
+  }
+
+  void flush_locked() noexcept {
+    if (used == 0)
+      return;
+    const std::size_t n = used;
+    used = 0;
+    current_tag = 0;
+    write_all(buf, n);
+  }
+
+  void push_locked(char tag, const char *data, std::size_t n) noexcept {
     if (data == nullptr || n == 0)
       return;
 
     if (n >= kBufSize) {
-      flush();
-      DWORD written = 0;
-      ::WriteFile(handle, &tag, 1, &written, nullptr);
-      ::WriteFile(handle, data, static_cast<DWORD>(n), &written, nullptr);
+      flush_locked();
+      write_all(&tag, 1);
+      write_all(data, n);
       current_tag = tag;
       return;
     }
 
     if (used + (tag != current_tag ? 1u : 0u) + n > kBufSize)
-      flush();
+      flush_locked();
 
     if (tag != current_tag) {
       buf[used++] = tag;
@@ -73,13 +110,47 @@ struct Sink {
     used += n;
 
     if (std::memchr(data, '\n', n) != nullptr)
-      flush();
+      flush_locked();
   }
 };
 
 inline Sink &sink() noexcept {
+
   static Sink *s = new Sink();
   return *s;
+}
+
+inline char tag_for(FILE *stream) noexcept {
+  if (stream == stdout)
+    return kStdoutTag;
+  if (stream == stderr)
+    return kStderrTag;
+  return 0;
+}
+
+inline int vpush(char tag, const char *fmt, va_list ap) {
+  char stack_buf[kStackFmt];
+
+  va_list again;
+  va_copy(again, ap);
+  const int n = ::vsnprintf(stack_buf, sizeof(stack_buf), fmt, again);
+  va_end(again);
+
+  if (n < 0)
+    return n;
+
+  if (static_cast<std::size_t>(n) < sizeof(stack_buf)) {
+    sink().push(tag, stack_buf, static_cast<std::size_t>(n));
+    return n;
+  }
+
+  std::string heap;
+  heap.resize(static_cast<std::size_t>(n) + 1);
+  va_copy(again, ap);
+  ::vsnprintf(&heap[0], heap.size(), fmt, again);
+  va_end(again);
+  sink().push(tag, heap.data(), static_cast<std::size_t>(n));
+  return n;
 }
 
 } // namespace detail
@@ -117,6 +188,7 @@ private:
 class Installer {
 public:
   Installer() {
+
     ::_setmode(1, _O_BINARY);
     ::_setmode(2, _O_BINARY);
     std::ios::sync_with_stdio(false);
@@ -143,6 +215,7 @@ struct AutoInstall {
   AutoInstall() { probe::ensure_installed(); }
 };
 static AutoInstall g_auto_install;
+
 struct AutoFlush {
   ~AutoFlush() { probe::flush(); }
 };
@@ -154,67 +227,35 @@ extern "C" inline void probe_flush(void) { probe::flush(); }
 extern "C" inline int probe_printf(const char *fmt, ...) {
   if (fmt == nullptr)
     return -1;
-  char stack_buf[4096];
   va_list ap;
   va_start(ap, fmt);
-  int n = ::vsnprintf(stack_buf, sizeof(stack_buf), fmt, ap);
+  const int n = probe::detail::vpush(probe::kStdoutTag, fmt, ap);
   va_end(ap);
-  if (n < 0)
-    return n;
-  if (static_cast<std::size_t>(n) < sizeof(stack_buf)) {
-    probe::detail::sink().push(probe::kStdoutTag, stack_buf,
-                               static_cast<std::size_t>(n));
-    return n;
-  }
-  std::string heap;
-  heap.resize(static_cast<std::size_t>(n) + 1);
-  va_start(ap, fmt);
-  ::vsnprintf(&heap[0], heap.size(), fmt, ap);
-  va_end(ap);
-  probe::detail::sink().push(probe::kStdoutTag, &heap[0],
-                             static_cast<std::size_t>(n));
   return n;
 }
 
 extern "C" inline int probe_fprintf(FILE *stream, const char *fmt, ...) {
   if (stream == nullptr || fmt == nullptr)
     return -1;
-  char tag;
-  if (stream == stdout)
-    tag = probe::kStdoutTag;
-  else if (stream == stderr)
-    tag = probe::kStderrTag;
-  else {
-    va_list ap;
-    va_start(ap, fmt);
-    int r = ::vfprintf(stream, fmt, ap);
-    va_end(ap);
-    return r;
-  }
-  char stack_buf[8192];
+
+  const char tag = probe::detail::tag_for(stream);
   va_list ap;
   va_start(ap, fmt);
-  int n = ::vsnprintf(stack_buf, sizeof(stack_buf), fmt, ap);
+
+  int n;
+  if (tag == 0)
+    n = ::vfprintf(stream, fmt, ap);
+  else
+    n = probe::detail::vpush(tag, fmt, ap);
+
   va_end(ap);
-  if (n < 0)
-    return n;
-  if (static_cast<std::size_t>(n) < sizeof(stack_buf)) {
-    probe::detail::sink().push(tag, stack_buf, static_cast<std::size_t>(n));
-    return n;
-  }
-  std::string heap;
-  heap.resize(static_cast<std::size_t>(n) + 1);
-  va_start(ap, fmt);
-  ::vsnprintf(&heap[0], heap.size(), fmt, ap);
-  va_end(ap);
-  probe::detail::sink().push(tag, &heap[0], static_cast<std::size_t>(n));
   return n;
 }
 
 extern "C" inline int probe_puts(const char *text) {
   if (text == nullptr)
     return EOF;
-  std::size_t n = std::strlen(text);
+  const std::size_t n = std::strlen(text);
   probe::detail::sink().push(probe::kStdoutTag, text, n);
   probe::detail::sink().push(probe::kStdoutTag, "\n", 1);
   return static_cast<int>(n + 1);
@@ -223,14 +264,10 @@ extern "C" inline int probe_puts(const char *text) {
 extern "C" inline int probe_fputs(const char *text, FILE *stream) {
   if (text == nullptr || stream == nullptr)
     return EOF;
-  char tag;
-  if (stream == stdout)
-    tag = probe::kStdoutTag;
-  else if (stream == stderr)
-    tag = probe::kStderrTag;
-  else
+  const char tag = probe::detail::tag_for(stream);
+  if (tag == 0)
     return ::fputs(text, stream);
-  std::size_t n = std::strlen(text);
+  const std::size_t n = std::strlen(text);
   probe::detail::sink().push(tag, text, n);
   return static_cast<int>(n);
 }
@@ -238,7 +275,7 @@ extern "C" inline int probe_fputs(const char *text, FILE *stream) {
 extern "C" inline int probe_putchar(int ch) {
   if (ch == EOF)
     return EOF;
-  char c = static_cast<char>(static_cast<unsigned char>(ch));
+  const char c = static_cast<char>(static_cast<unsigned char>(ch));
   probe::detail::sink().push(probe::kStdoutTag, &c, 1);
   return ch;
 }
@@ -246,46 +283,49 @@ extern "C" inline int probe_putchar(int ch) {
 extern "C" inline int probe_fputc(int ch, FILE *stream) {
   if (stream == nullptr || ch == EOF)
     return EOF;
-  char tag;
-  if (stream == stdout)
-    tag = probe::kStdoutTag;
-  else if (stream == stderr)
-    tag = probe::kStderrTag;
-  else
+  const char tag = probe::detail::tag_for(stream);
+  if (tag == 0)
     return ::fputc(ch, stream);
-  char c = static_cast<char>(static_cast<unsigned char>(ch));
+  const char c = static_cast<char>(static_cast<unsigned char>(ch));
   probe::detail::sink().push(tag, &c, 1);
   return ch;
 }
 
 extern "C" inline std::size_t probe_fwrite(const void *ptr, std::size_t size,
                                            std::size_t count, FILE *stream) {
-  if (stream == nullptr)
+  if (stream == nullptr || ptr == nullptr || size == 0 || count == 0)
     return 0;
-  char tag;
-  if (stream == stdout)
-    tag = probe::kStdoutTag;
-  else if (stream == stderr)
-    tag = probe::kStderrTag;
-  else
+  const char tag = probe::detail::tag_for(stream);
+  if (tag == 0)
     return ::fwrite(ptr, size, count, stream);
-  std::size_t n = size * count;
-  if (n != 0)
-    probe::detail::sink().push(tag, static_cast<const char *>(ptr), n);
+  probe::detail::sink().push(tag, static_cast<const char *>(ptr), size * count);
   return count;
 }
 
 extern "C" inline int probe_fflush(FILE *stream) {
-  if (stream == stdout || stream == stderr) {
-    probe::detail::sink().flush();
-    return 0;
-  }
   if (stream == nullptr) {
     probe::detail::sink().flush();
     return ::fflush(nullptr);
   }
+  if (probe::detail::tag_for(stream) != 0) {
+    probe::detail::sink().flush();
+    return 0;
+  }
   return ::fflush(stream);
 }
+
+#ifndef PROBE_NO_STD_ALIASES
+namespace std {
+using ::probe_fflush;
+using ::probe_fprintf;
+using ::probe_fputc;
+using ::probe_fputs;
+using ::probe_fwrite;
+using ::probe_printf;
+using ::probe_putchar;
+using ::probe_puts;
+} // namespace std
+#endif
 
 #ifdef printf
 #undef printf

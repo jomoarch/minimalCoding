@@ -375,17 +375,22 @@ ConfigResult load_config(const std::filesystem::path &path) {
 
   if (c.inject_probe && c.inject_header.empty()) {
     std::error_code ec;
-    const auto at_base = base / "include" / "inject" / "probe.h";
-    const auto at_config = config_dir / "include" / "inject" / "probe.h";
-    const auto at_tool = module_dir() / "include" / "inject" / "probe.h";
-    if (std::filesystem::exists(at_base, ec))
-      c.inject_header = compress_path(at_base);
-    else if (std::filesystem::exists(at_config, ec))
-      c.inject_header = compress_path(at_config);
-    else if (!at_tool.empty() && std::filesystem::exists(at_tool, ec))
-      c.inject_header = compress_path(at_tool);
-    else
-      c.inject_header = compress_path(at_base);
+    const std::filesystem::path roots[] = {base, config_dir, module_dir()};
+    std::filesystem::path found;
+    for (const std::filesystem::path &root : roots) {
+      if (root.empty() || !found.empty())
+        continue;
+      for (const char *sub : {"include/inject/probe.h", "inject/probe.h"}) {
+        const std::filesystem::path candidate = root / sub;
+        if (std::filesystem::exists(candidate, ec)) {
+          found = candidate;
+          break;
+        }
+      }
+    }
+    if (found.empty())
+      found = base / "include" / "inject" / "probe.h";
+    c.inject_header = compress_path(found);
   }
 
   std::string ignored;

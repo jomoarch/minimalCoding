@@ -108,10 +108,25 @@ src/two/a.cpp   ->  .coding/build/src/two/a.probe.exe
 
 两条独立管道**无法**保证 stdout 和 stderr 的先后顺序，先写的那一路可能后到。所以 `cg_s` / `cg_i` 换了个做法：
 
-1. **编译期**：把 `include/inject/probe.h` 强制塞进翻译单元（`g++` /`clang++` 用 `-include`，`cl.exe` 用 `/FI`）。它接管 `cout` /`cerr` / `clog` 以及 `printf` 这一族 C 输出函数，把所有输出写进**同一条**带标记的流：`\x01` 表示 stdout、`\x02` 表示 stderr，且只在流切换时打一次标记。
+1. **编译期**：把 `inject/probe.h` 强制塞进翻译单元（`g++` /`clang++` 用 `-include`，`cl.exe` 用 `/FI`）。它接管 `cout` /`cerr` / `clog` 以及 `printf` 这一族 C 输出函数，把所有输出写进**同一条**带标记的流：`\x01` 表示 stdout、`\x02` 表示 stderr，且只在流切换时打一次标记。
 2. **运行期**：`cg` 解析这条流，把字节还原成两路——顺序天然就是程序产生的顺序。
 
 于是 `cg_s` / `cg_i` 里 stdout 绿色、stderr 红色，像终端里那样正确交织。
+
+接管是靠宏做的，所以这些细节值得知道：
+
+| 情况                                                           | 行为                                     |
+| -------------------------------------------------------------- | ---------------------------------------- |
+| `printf(...)` / `::printf(...)`                                | 接管                                     |
+| `std::printf(...)` 这类**限定名**写法                          | 接管，定义 `PROBE_NO_STD_ALIASES` 可关掉 |
+| `std::cout` / `std::cerr` / `std::clog`                        | 接管                                     |
+| `sprintf` / `snprintf` / `vsnprintf`                           | **不接管**                               |
+| `fprintf(f, …)` / `fputs(…, f)` 里的 `f` 是 `fopen` 出来的文件 | **原样转发**，不受影响                   |
+| 多线程同时输出                                                 | 合并流内部有锁                           |
+| `std::wcout` / `wprintf` 等宽字符输出                          | **不接管**，直接写原句柄                 |
+| 先 `freopen` 重定向过 stdout                                   | 仍写原来的句柄                           |
+
+缓冲遇到换行立刻 flush，所以程序中途崩溃也不会吞掉已有输出；`ExitProcess` 这类硬退出除外。
 
 ### 交互模式下的粘贴
 
@@ -268,23 +283,23 @@ bin/config.link  ->  ../shared/team.link  ->  C:/path/config.toml
 
 ### 全部键
 
-| 键                         | 说明                                                                                    |
-| -------------------------- | --------------------------------------------------------------------------------------- |
-| `base`                     | 文件里所有相对路径的起点；缺省为配置文件所在目录                                        |
-| `[compiler].source`        | 源**目录**或单个源**文件**；目录则递归挑最新的 `.cpp`，文件则只认 `.cpp`。缺省为 `base` |
-| `[compiler].args`          | 完整编译命令；源码与 `-o <output>` 会自动追加。默认 `g++ -std=c++17`                    |
-| `[compiler].force_rebuild` | `true` 时每次运行都重新编译，默认 `false`                                               |
-| `[inject].enabled`         | 是否注入 `probe.h`（默认 `true`）；关掉就不需要头文件                                   |
-| `[inject].header`          | 要注入的头文件；缺省按 `base`、配置文件目录、`.exe` 目录依次找 `include/inject/probe.h` |
-| `[runner].time_limit_ms`   | CPU 时间上限；不写就永远不杀超时程序                                                    |
-| `[runner].memory_limit_mb` | 内存上限；`0` 表示不限                                                                  |
-| `[io].single_input`        | `cg_s` 的输入文件                                                                       |
-| `[io].single_output`       | 程序输出落盘的位置                                                                      |
-| `[io].colorize_output`     | 是否给程序自身输出染色（默认 `true`）                                                   |
-| `[io].merge_stderr`        | 是否把 stderr 也写进输出文件；不写就各自维持现状（见上文「stderr 要不要进输出文件」）   |
-| `[io].print_input`         | 回显时是否先把输入打出来；默认 `false`                                                  |
-| `[daemon].interactive`     | `cg_t` 触发交互模式的热键，默认 `Ctrl+Alt+I`；留空关掉                                  |
-| `[daemon].single`          | `cg_t` 触发单文件模式的热键，默认 `Ctrl+Alt+S`；留空关掉                                |
-| `[daemon].quit`            | `cg_t` 退出热键，默认 `Ctrl+Alt+Q`；留空关掉                                            |
+| 键                         | 说明                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `base`                     | 文件里所有相对路径的起点；缺省为配置文件所在目录                                                                                 |
+| `[compiler].source`        | 源**目录**或单个源**文件**；目录则递归挑最新的 `.cpp`，文件则只认 `.cpp`。缺省为 `base`                                          |
+| `[compiler].args`          | 完整编译命令；源码与 `-o <output>` 会自动追加。默认 `g++ -std=c++17`                                                             |
+| `[compiler].force_rebuild` | `true` 时每次运行都重新编译，默认 `false`                                                                                        |
+| `[inject].enabled`         | 是否注入 `probe.h`（默认 `true`）；关掉就不需要头文件                                                                            |
+| `[inject].header`          | 要注入的头文件；缺省按 `base`、配置文件目录、`.exe` 目录依次找 `include/inject/probe.h`，找不到再找同名目录下的 `inject/probe.h` |
+| `[runner].time_limit_ms`   | CPU 时间上限；不写就永远不杀超时程序                                                                                             |
+| `[runner].memory_limit_mb` | 内存上限；`0` 表示不限                                                                                                           |
+| `[io].single_input`        | `cg_s` 的输入文件                                                                                                                |
+| `[io].single_output`       | 程序输出落盘的位置                                                                                                               |
+| `[io].colorize_output`     | 是否给程序自身输出染色（默认 `true`）                                                                                            |
+| `[io].merge_stderr`        | 是否把 stderr 也写进输出文件；不写就各自维持现状（见上文「stderr 要不要进输出文件」）                                            |
+| `[io].print_input`         | 回显时是否先把输入打出来；默认 `false`                                                                                           |
+| `[daemon].interactive`     | `cg_t` 触发交互模式的热键，默认 `Ctrl+Alt+I`；留空关掉                                                                           |
+| `[daemon].single`          | `cg_t` 触发单文件模式的热键，默认 `Ctrl+Alt+S`；留空关掉                                                                         |
+| `[daemon].quit`            | `cg_t` 退出热键，默认 `Ctrl+Alt+Q`；留空关掉                                                                                     |
 
 可执行文件、运行目录与缓存表都由程序在 `<base>/.coding/` 下生成，**不能**再用配置指定；旧配置里的 `[compiler].output`、`[compiler].output_probe`、`[runner].work_dir` 会被忽略。
