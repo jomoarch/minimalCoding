@@ -39,6 +39,12 @@ std::string filename_of(const std::filesystem::path &path) {
   return std::string(utf8.begin(), utf8.end());
 }
 
+std::string cache_key_of(const BuildOption &opts) {
+  if (!opts.cache_key.empty())
+    return opts.cache_key;
+  return filename_of(opts.source_path);
+}
+
 } // namespace
 
 BuildResult ensure_built(const BuildOption &opts) {
@@ -95,8 +101,7 @@ BuildResult ensure_built(const BuildOption &opts) {
             std::cerr << color::warn("[build] ", warning, "\n");
         }
         const std::string *cached =
-            opts.cache_path.empty() ? nullptr
-                                    : table.find(filename_of(opts.source_path));
+            opts.cache_path.empty() ? nullptr : table.find(cache_key_of(opts));
         if (cached != nullptr && *cached == sha) {
           reason = "sha256 matches";
         } else {
@@ -118,15 +123,18 @@ BuildResult ensure_built(const BuildOption &opts) {
   if (!opts.cache_path.empty())
     hasher.ready(sha);
 
+  const std::filesystem::path trash =
+      opts.trash_dir.empty() ? opts.output_path.parent_path() / ".trash"
+                             : opts.trash_dir;
+
   std::string note;
-  stale_exe::Outcome cleared = stale_exe::clear(opts.output_path, false, note);
+  stale_exe::Outcome cleared =
+      stale_exe::clear(opts.output_path, false, trash, note);
   if (cleared == stale_exe::Outcome::Blocked) {
     std::cout << color::err("[build] ", note, "\n") << std::flush;
-    if (prompt::ask_yes_no(
-            "Move it into " +
-            show_path(opts.output_path.parent_path() / ".trash") +
-            " under its SHA-256 and carry on?")) {
-      cleared = stale_exe::clear(opts.output_path, true, note);
+    if (prompt::ask_yes_no("Move it into " + show_path(trash) +
+                           " under its SHA-256 and carry on?")) {
+      cleared = stale_exe::clear(opts.output_path, true, trash, note);
       if (cleared == stale_exe::Outcome::Parked)
         std::cout << color::ok("[build] ", note, "\n") << std::flush;
     }
@@ -163,7 +171,7 @@ BuildResult ensure_built(const BuildOption &opts) {
       cache::Table table(opts.cache_path);
       std::string warning;
       table.load(warning);
-      table.touch(filename_of(opts.source_path), sha);
+      table.touch(cache_key_of(opts), sha);
       std::string error;
       if (!table.save(error))
         std::cerr << color::warn("[build] cache not saved: ", error, "\n");

@@ -9,7 +9,8 @@ namespace stale_exe {
 
 enum class Outcome { Cleared, Parked, Blocked };
 
-Outcome clear(const std::filesystem::path &exe, bool park, std::string &note);
+Outcome clear(const std::filesystem::path &exe, bool park,
+              const std::filesystem::path &trash_dir, std::string &note);
 
 } // namespace stale_exe
 

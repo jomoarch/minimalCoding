@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cwctype>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -250,6 +251,28 @@ void resolve_all(const std::filesystem::path &base, Paths &...paths) {
   ((paths = resolve(base, paths)), ...);
 }
 
+std::filesystem::path external_key(const std::filesystem::path &source) {
+  std::wstring root = source.root_name().wstring();
+  for (wchar_t &c : root) {
+    if (std::iswalnum(c) == 0)
+      c = L'_';
+  }
+
+  std::filesystem::path tail;
+  for (const std::filesystem::path &part : source.relative_path()) {
+    if (part.empty() || part == "." || part.has_root_directory())
+      continue;
+    tail /= part;
+  }
+
+  std::filesystem::path key = "_external";
+  if (!root.empty())
+    key /= root;
+  if (!tail.empty())
+    key /= tail;
+  return key;
+}
+
 } // namespace
 
 ConfigResult load_config(const std::filesystem::path &path) {
@@ -397,9 +420,17 @@ BuildPaths build_paths(const AppConfig &cfg,
   if (stem.empty())
     stem = source.filename().string();
 
-  paths.exe = compress_path(cfg.build_dir / (stem + ".exe"));
+  std::filesystem::path rel = relative_to(cfg.base, source);
+  if (rel.empty())
+    rel = external_key(source);
+
+  paths.key = rel.string();
+  const std::filesystem::path dir = rel.parent_path();
+
+  paths.exe = compress_path(cfg.build_dir / dir / (stem + ".exe"));
   if (cfg.inject_probe && !cfg.inject_header.empty())
-    paths.exe_probe = compress_path(cfg.build_dir / (stem + ".probe.exe"));
+    paths.exe_probe =
+        compress_path(cfg.build_dir / dir / (stem + ".probe.exe"));
   else
     paths.exe_probe = paths.exe;
   return paths;

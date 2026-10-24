@@ -67,8 +67,8 @@ std::string format_time(const std::filesystem::path &path) {
   return buffer;
 }
 
-void print_source(const PickedSource &pick) {
-  std::cout << color::info("[source] ") << show_path(pick.path);
+void print_source(const AppConfig &cfg, const PickedSource &pick) {
+  std::cout << color::info("[source] ") << show_relative(cfg.base, pick.path);
   const std::string stamp = format_time(pick.path);
   if (!stamp.empty())
     std::cout << color::gray(" (modified ", stamp, ")");
@@ -94,6 +94,8 @@ BuildResult build_step(const AppConfig &cfg, const BuildPaths &paths,
   opt.output_path = target == BuildTarget::Probe ? paths.exe_probe : paths.exe;
   opt.args = cfg.args;
   opt.cache_path = cfg.cache_path;
+  opt.cache_key = paths.key;
+  opt.trash_dir = cfg.build_dir / ".trash";
   opt.extra_deps.push_back(cfg.config_path);
 
   if (target == BuildTarget::Probe && uses_probe_build(cfg)) {
@@ -109,12 +111,15 @@ BuildResult build_step(const AppConfig &cfg, const BuildPaths &paths,
   return br;
 }
 
-void print_build_line(const std::filesystem::path &exe, const BuildResult &s) {
+void print_build_line(const AppConfig &cfg, const std::filesystem::path &exe,
+                      const BuildResult &s) {
   color::Scope green(std::cout, {color::Code::Green, color::Code::Bold});
+
+  const std::string shown = show_relative(cfg.base, exe);
   if (s.rebuilt) {
-    std::cout << "[build] built -> " << show_path(exe);
+    std::cout << "[build] built -> " << shown;
   } else {
-    std::cout << "[build] up-to-date (" << text::to_text(exe.filename());
+    std::cout << "[build] up-to-date (" << shown;
     if (!s.reason.empty())
       std::cout << ", " << s.reason;
     std::cout << ')';
@@ -255,7 +260,7 @@ ModeOutcome run_interactive(const AppConfig &cfg) {
     out.wait_key = true;
     return out;
   }
-  print_source(pick);
+  print_source(cfg, pick);
 
   if (!need_probe_header(cfg, error)) {
     std::cerr << color::err("[config] ", error) << "\n";
@@ -268,7 +273,7 @@ ModeOutcome run_interactive(const AppConfig &cfg) {
     out.code = 2;
     return out;
   }
-  print_build_line(paths.exe_probe, built);
+  print_build_line(cfg, paths.exe_probe, built);
 
   std::cout << "[run] interactive mode\n";
 
@@ -310,7 +315,7 @@ ModeOutcome run_single_file(const AppConfig &cfg) {
     out.wait_key = true;
     return out;
   }
-  print_source(pick);
+  print_source(cfg, pick);
 
   if (!need_probe_header(cfg, error)) {
     std::cerr << color::err("[config] ", error) << "\n";
@@ -341,7 +346,7 @@ ModeOutcome run_single_file(const AppConfig &cfg) {
     out.code = 2;
     return out;
   }
-  print_build_line(paths.exe_probe, built);
+  print_build_line(cfg, paths.exe_probe, built);
 
   const std::size_t input_size = input.size();
   std::cout << color::ok("[io] input <- ", cfg.single_input, " (", input_size,

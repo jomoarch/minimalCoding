@@ -57,6 +57,8 @@ struct BuildPaths {
   std::filesystem::path source;
   std::filesystem::path exe;
   std::filesystem::path exe_probe;
+
+  std::string key;
 };
 
 [[nodiscard]] ConfigResult load_config(const std::filesystem::path &path);

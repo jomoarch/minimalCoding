@@ -16,6 +16,13 @@ compress_path(const std::filesystem::path &p, bool resolve_symlinks = false,
 
 [[nodiscard]] std::string show_path(const std::filesystem::path &p);
 
+[[nodiscard]] std::filesystem::path
+relative_to(const std::filesystem::path &base,
+            const std::filesystem::path &path);
+
+[[nodiscard]] std::string show_relative(const std::filesystem::path &base,
+                                        const std::filesystem::path &path);
+
 } // namespace coding
 
 #endif // PATH_HPP

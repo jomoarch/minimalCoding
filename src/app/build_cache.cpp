@@ -129,8 +129,8 @@ bool Table::save(std::string &error) const {
       error = "cannot write " + show_path(temporary);
       return false;
     }
-    file << "# coding build cache: <sha256> <filename>, most recently built "
-            "first\n";
+    file << "# coding build cache: <sha256> <path relative to base>, most "
+            "recently built first\n";
     for (const Entry &entry : entries_)
       file << entry.sha256 << ' ' << entry.filename << '\n';
     file.flush();

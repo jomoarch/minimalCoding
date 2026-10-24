@@ -25,7 +25,8 @@ fs::path unique_target(const fs::path &dir, const std::string &name) {
 
 namespace stale_exe {
 
-Outcome clear(const fs::path &exe, bool park, std::string &note) {
+Outcome clear(const fs::path &exe, bool park, const fs::path &trash_dir,
+              std::string &note) {
   std::error_code ec;
   if (exe.empty() || !fs::exists(exe, ec))
     return Outcome::Cleared;
@@ -41,7 +42,8 @@ Outcome clear(const fs::path &exe, bool park, std::string &note) {
   const std::string reason =
       ec ? win::error_string(static_cast<DWORD>(ec.value()))
          : std::string("the file is still open");
-  const fs::path dir = exe.parent_path() / ".trash";
+  const fs::path dir =
+      trash_dir.empty() ? exe.parent_path() / ".trash" : trash_dir;
 
   if (!park) {
     note = "cannot delete " + show_path(exe) + ": " + reason;

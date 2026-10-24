@@ -17,6 +17,10 @@ struct BuildOption {
 
   std::filesystem::path cache_path;
 
+  std::filesystem::path trash_dir;
+
+  std::string cache_key;
+
   bool force_rebuild{false};
 };
 

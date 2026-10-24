@@ -37,10 +37,10 @@ cmake --build build --config Release
    - 是**目录**时：递归扫描它，只认 `.cpp`（大小写不敏感），不进入 `.` 开头的目录（`.git`、`.coding` 之类），按**最后修改时间**挑出最新的一个；时间并列时取路径字典序小的。
    - 是**文件**时：直接用它。**只认 `.cpp`**，不是 `.cpp` 就报错，不会"猜"你所在的目录。
 
-   无论哪种，都会把选中的文件打印出来：
+   无论哪种，都会把选中的文件打印出来（路径**相对 `base`**；只有源文件在 `base` 之外时才显示绝对路径）：
 
    ```
-   [source] C:\...\a.cpp (modified 2026-06-01 12:00:00)
+   [source] src\one\a.cpp (modified 2026-06-01 12:00:00)
    ```
 
    路径不存在、既不是目录也不是普通文件、文件不是 `.cpp`、或者目录里没有任何 `.cpp` 时，报错后**等你按任意键**再以退出码 `2` 结束。
@@ -52,34 +52,43 @@ cmake --build build --config Release
 
 ### `.coding/` 里有什么
 
-| 路径                               | 内容                               |
-| ---------------------------------- | ---------------------------------- |
-| `.coding/build/<文件名>.exe`       | 原版可执行文件                     |
-| `.coding/build/<文件名>.probe.exe` | 注入版可执行文件（默认跑的就是它） |
-| `.coding/build/.cache`             | 构建缓存表                         |
-| `.coding/build/.trash/`            | 删不掉的旧 exe 挪到这里            |
-| `.coding/work/`                    | 运行目录                           |
+| 路径                                          | 内容                               |
+| --------------------------------------------- | ---------------------------------- |
+| `.coding/build/<相对目录>/<文件名>.exe`       | 原版可执行文件                     |
+| `.coding/build/<相对目录>/<文件名>.probe.exe` | 注入版可执行文件（默认跑的就是它） |
+| `.coding/build/.cache`                        | 构建缓存表                         |
+| `.coding/build/.trash/`                       | 删不掉的旧 exe 挪到这里            |
+| `.coding/work/`                               | 运行目录                           |
 
-`<文件名>` 是源文件去掉 `.cpp` 之后的名字。不同目录下的同名 `.cpp` 会共用同一个 exe 和同一条缓存记录（都按文件名区分）。`[compiler].output`、`[compiler].output_probe`、`[runner].work_dir` 已经从配置里删掉，写了也会被忽略（stderr 上会提示一行）；`[io].single_input` / `[io].single_output` 不变，仍按 `base` 解析。
+**产物按源文件相对 `base` 的目录结构摆放**，`<文件名>` 是源文件去掉 `.cpp` 之后的名字。所以两个同名源文件各有各的产物，不会再互相覆盖：
+
+```
+src/one/a.cpp   ->  .coding/build/src/one/a.probe.exe
+src/two/a.cpp   ->  .coding/build/src/two/a.probe.exe
+```
+
+源文件在 `base` 之外时退到 `.coding/build/_external/<盘符>/<其余路径>/`，同样稳定、不撞车，也不依赖当前工作目录。
+
+`[compiler].output`、`[compiler].output_probe`、`[runner].work_dir` 已经从配置里删掉，写了也会被忽略（stderr 上会提示一行）；`[io].single_input` / `[io].single_output` 不变，仍按 `base` 解析。
 
 ### 什么时候重新编译
 
 三层判定：
 
-1. `config.toml` 或注入头比 exe 新 → 重编译（改了 `-O2`、换了头文件不用手动删 exe）；
+1. `config.toml` 或注入头比 exe 新 → 重编译；
 2. 否则 exe 比源文件新 → **不重编译**（连哈希都不算）；
 3. 否则算源文件的 SHA-256，和 `.cache` 里记的比：一样 → 不重编译（只是 `touch` 了文件、内容没变），不一样或者没有记录 → 重编译。
 
-`[build]` 那一行会带上原因，比如 `[build] up-to-date (a.exe, exe is newer)`、`[build] up-to-date (a.exe, sha256 matches)`、`[build] built -> ... (sha256 changed)`。
+`[build]` 那一行会带上原因，路径同样相对 `base`，比如 `[build] up-to-date (.coding\build\src\a.probe.exe, exe is newer)`、`[build] up-to-date (.coding\build\src\a.probe.exe, sha256 matches)`、`[build] built -> .coding\build\src\a.probe.exe (no exe yet)`。
 
 ### 缓存表 `.cache`
 
-纯文本，一行一条，最近的排在最上面：
+纯文本，一行一条，最近的排在最上面。键是**源文件相对 `base` 的路径**，不是文件名 —— 否则两个同名源文件会互相顶掉缓存记录：
 
 ```
-# coding build cache: <sha256> <filename>, most recently built first
-9f2c... a.cpp
-0b71... b.cpp
+# coding build cache: <sha256> <path relative to base>, most recently built first
+9f2c... src\one\a.cpp
+0b71... src\two\a.cpp
 ```
 
 重编译成功后会先把旧的那条删掉、再把新的一条插到第一行，所以最近编译的文件永远在最好找、最好改的位置。缓存命中时不重写这个文件（免得每次运行都动磁盘），也没有条数上限。
@@ -92,7 +101,7 @@ cmake --build build --config Release
 
 重新编译要先把旧的 exe 删掉。Windows 上**正在运行的程序**和**没人回收的编译器进程**都会占住这个文件，这时删除会以**拒绝访问**失败，而重命名仍然可以。所以：
 
-1. 先打印**失败原因**，然后问你要不要把旧 exe 挪进**同目录下的 `.trash/`**（也就是 `<base>/.coding/build/.trash/`），文件名就是它自己的 **SHA-256**。这是重命名，不受占用影响。
+1. 先打印**失败原因**，然后问你要不要把旧 exe 挪进 **`.coding/build/.trash/`**（产物按目录分层，但 `.trash` 固定在 build 根下，不会在每个子目录里散落），文件名就是它自己的 **SHA-256**。这是重命名，不受占用影响。
 2. 连重命名都失败就真没招了：打印说明、等你**按任意键**，然后以退出码 `2` 结束，不再继续编译。
 
 ### stdout / stderr 的分离
