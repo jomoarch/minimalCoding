@@ -9,6 +9,9 @@ if(NOT WIN32)
   message(FATAL_ERROR "This project only supports Windows.")
 endif()
 
+enable_language(RC)
+set(APP_ICON_RC ${CMAKE_CURRENT_SOURCE_DIR}/resource/icon/mahjong.rc)
+
 set(CORE_SOURCES
   src/base/text.cpp
   src/base/color.cpp
@@ -57,6 +60,7 @@ add_executable(cg_t
   src/daemon/hotkey_service.cpp
   src/daemon/job_launcher.cpp
   src/daemon/slot_report.cpp
+  ${APP_ICON_RC}
 )
 
 foreach(app cg_s cg_i cg_t)
