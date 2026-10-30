@@ -48,9 +48,9 @@ struct Shared {
   std::atomic<bool> stop{false};
   std::atomic<bool> done{false};
 
-  void *process{nullptr};
-  void *job{nullptr};
-  bool started{false};
+  std::atomic<void *> process{nullptr};
+  std::atomic<void *> job{nullptr};
+  std::atomic<bool> started{false};
   std::chrono::steady_clock::time_point start{};
 };
 
@@ -107,10 +107,10 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
 
   opt.on_started = [&shared](void *process, void *job) {
     app::report_program_started(process);
-    shared.process = process;
-    shared.job = job;
+    shared.process.store(process, std::memory_order_relaxed);
+    shared.job.store(job, std::memory_order_relaxed);
     shared.start = std::chrono::steady_clock::now();
-    shared.started = true;
+    shared.started.store(true, std::memory_order_release);
   };
 
   opt.on_output = [&shared, &base](const char *data, std::size_t n,
@@ -155,6 +155,14 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
     }
   };
 
+  opt.stdin_cancel = [&shared] {
+    {
+      std::lock_guard<std::mutex> lock(shared.m);
+      shared.eof = true;
+    }
+    shared.cv.notify_all();
+  };
+
   SingleRunResult result;
   std::thread worker([&]() {
     result = run_single(opt);
@@ -167,7 +175,19 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
   bool interrupted = false;
   bool eof_sent = false;
 
+  const auto child_exited = [&shared]() -> bool {
+    if (!shared.started.load(std::memory_order_acquire))
+      return false;
+    HANDLE process =
+        static_cast<HANDLE>(shared.process.load(std::memory_order_relaxed));
+    return process != nullptr &&
+           ::WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+  };
+
   while (!shared.done.load(std::memory_order_relaxed)) {
+    if (child_exited())
+      break;
+
     linedit::Key key = linedit::Key::Text;
     char32_t ch = 0;
     bool got = session.read_any(key, ch, tick);
@@ -179,7 +199,12 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
       } else {
         const linedit::Outcome action = editor.feed(key, ch);
         if (action == linedit::Outcome::Submitted) {
-          submit_line(editor, shared, bar);
+          if (child_exited()) {
+            editor.clear();
+            bar.set_input(editor.text(), editor.cursor);
+          } else {
+            submit_line(editor, shared, bar);
+          }
         } else if (action == linedit::Outcome::Interrupt && !interrupted) {
           interrupted = true;
           {
@@ -188,8 +213,9 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
           }
           shared.cv.notify_all();
           shared.stop.store(true, std::memory_order_relaxed);
-          if (shared.job != nullptr)
-            TerminateJobObject(static_cast<HANDLE>(shared.job), 1);
+          void *job = shared.job.load(std::memory_order_relaxed);
+          if (job != nullptr)
+            TerminateJobObject(static_cast<HANDLE>(job), 1);
         } else if (action == linedit::Outcome::EndOfInput && !eof_sent) {
           eof_sent = true;
           {
@@ -202,9 +228,10 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
       got = session.read_any(key, ch, 0);
     }
 
-    if (shared.started) {
-      const monitor::Sample now =
-          monitor::sample(shared.process, shared.job, shared.start);
+    if (shared.started.load(std::memory_order_acquire)) {
+      const monitor::Sample now = monitor::sample(
+          shared.process.load(std::memory_order_relaxed),
+          shared.job.load(std::memory_order_relaxed), shared.start);
       spinner.advance(watch.cpu_advanced(now));
       watch.update(now);
       const linedit::Size size = session.size();

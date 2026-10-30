@@ -377,6 +377,9 @@ bool spawn_child(const SingleRunOption &opts, PipeSet &pipes, HANDLE job,
   PROCESS_INFORMATION pi{};
   DWORD create_flags = CREATE_SUSPENDED | CREATE_NO_WINDOW;
 
+  ::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
+                 SEM_NOOPENFILEERRORBOX);
+
   if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE,
                       create_flags, nullptr, cwd, &si, &pi)) {
     out.result.message = "CreateProcessW failed: " + win::last_error_string();
@@ -560,6 +563,8 @@ void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
                   std::chrono::steady_clock::time_point started, bool time_out,
                   SingleRunResult &out) {
   stdin_stop.store(true, std::memory_order_relaxed);
+  if (opts.stdin_cancel)
+    opts.stdin_cancel();
   if (stdin_pump.joinable())
     stdin_pump.join();
   if (ctx.pump.joinable())
