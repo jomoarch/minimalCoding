@@ -534,6 +534,26 @@ bool wait_for_child(const SingleRunOption &opts, HANDLE process, HANDLE job) {
   return false;
 }
 
+constexpr std::size_t kMaxCrashText = 8192;
+
+std::string tail_of_stderr(const std::string &text, std::size_t limit) {
+  std::size_t begin = text.size() > limit ? text.size() - limit : 0;
+  if (begin != 0) {
+    const std::size_t nl = text.find('\n', begin);
+    begin = nl == std::string::npos ? text.size() : nl + 1;
+  }
+
+  std::string out;
+  out.reserve(text.size() - begin);
+  for (std::size_t i = begin; i < text.size(); ++i) {
+    if (text[i] != '\r')
+      out.push_back(text[i]);
+  }
+  while (!out.empty() && out.back() == '\n')
+    out.pop_back();
+  return out;
+}
+
 void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
                   OutputContext &ctx, std::thread &stdin_pump,
                   std::atomic<bool> &stdin_stop, HANDLE process, HANDLE job,
@@ -548,9 +568,8 @@ void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
   pipes.out_read.reset();
   pipes.err_read.reset();
 
-  if (opts.tagged_stream && !ctx.raw_err.empty() && opts.echo)
-    write_styled(opts.colorize_output, &ctx.stderr_style, ctx.raw_err.data(),
-                 ctx.raw_err.size());
+  if (opts.tagged_stream && !ctx.raw_err.empty())
+    out.crash_text = tail_of_stderr(ctx.raw_err, kMaxCrashText);
 
   if (opts.tagged_stream && ctx.splitter && ctx.splitter->bytes() > 0 &&
       !ctx.splitter->saw_tag())

@@ -14,6 +14,7 @@ void fill_accounting(RunnerResult &out, void *process, void *job,
   out.cpu_time = s.cpu_ms();
   out.wall_time = s.wall;
   out.memory_bytes = s.peak_bytes;
+  out.exit_code = s.exit_code;
 
   if (s.alive) {
     out.status = RunnerStatus::SystemError;
@@ -38,7 +39,7 @@ void fill_accounting(RunnerResult &out, void *process, void *job,
     out.message = "Success";
   } else {
     out.status = RunnerStatus::RuntimeError;
-    out.message = "Exit code: " + std::to_string(s.exit_code);
+    out.message.clear();
   }
 }
 

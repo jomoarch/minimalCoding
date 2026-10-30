@@ -14,6 +14,7 @@ struct [[nodiscard]] RunnerResult {
   std::chrono::milliseconds cpu_time{0};
   std::chrono::milliseconds wall_time{0};
   std::size_t memory_bytes{0};
+  unsigned long exit_code{0};
   std::string message;
 
   bool ok() const noexcept { return status == RunnerStatus::Success; }

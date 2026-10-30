@@ -38,6 +38,7 @@ struct SingleRunResult {
   std::string captured;
   std::string warning;
   std::string user_input;
+  std::string crash_text;
 
   bool ok() const noexcept { return result.ok(); }
   explicit operator bool() const noexcept { return result.ok(); }
