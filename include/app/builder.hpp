@@ -12,6 +12,8 @@ struct BuildOption {
   std::filesystem::path output_path;
   std::vector<std::string> args;
 
+  std::filesystem::path base;
+
   std::vector<std::filesystem::path> extra_deps;
 
   std::filesystem::path inject_header;
@@ -19,6 +21,8 @@ struct BuildOption {
   std::filesystem::path cache_path;
 
   std::filesystem::path trash_dir;
+
+  std::filesystem::path pch_dir;
 
   std::string cache_key;
 

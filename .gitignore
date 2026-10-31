@@ -4,3 +4,4 @@ build/
 .coding/
 *.link
 *.exe
+*.gch

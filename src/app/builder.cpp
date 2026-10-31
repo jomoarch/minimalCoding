@@ -1,5 +1,6 @@
 #include "app/builder.hpp"
 #include "app/build_cache.hpp"
+#include "app/pch.hpp"
 #include "app/prompt.hpp"
 #include "app/stale_exe.hpp"
 #include "base/color.hpp"
@@ -146,11 +147,34 @@ BuildResult ensure_built(const BuildOption &opts) {
     return r;
   }
 
+  std::filesystem::path inject = opts.inject_header;
+  if (!inject.empty() && !opts.pch_dir.empty()) {
+    pch::Request request;
+    request.header = inject;
+    request.cache_dir = opts.pch_dir;
+    request.args = opts.args;
+
+    const pch::Result prepared = pch::ensure(request);
+    if (prepared.ok) {
+      inject = prepared.include_path;
+      if (prepared.rebuilt) {
+        std::cout << color::gray("[build] precompiled header -> ",
+                                 show_relative(opts.base, inject), " (",
+                                 prepared.elapsed.count(), " ms)")
+                  << "\n"
+                  << std::flush;
+      }
+    } else {
+      std::cerr << color::warn(
+          "[build] precompiled header skipped: ", prepared.error, "\n");
+    }
+  }
+
   CompilerOptions co;
   co.source_path = opts.source_path;
   co.output_path = opts.output_path;
   co.args = opts.args;
-  co.inject_header = opts.inject_header;
+  co.inject_header = inject;
 
   const auto compile_start = std::chrono::steady_clock::now();
   auto cr = compile_source(co);

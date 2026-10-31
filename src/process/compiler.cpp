@@ -68,6 +68,72 @@ bool is_c_source(const std::filesystem::path &p) {
   return to_lower_ascii(p.extension().string()) == ".c";
 }
 
+bool gcc_style_pch_supported(const std::string &argv0) {
+  const std::string stem = compiler_stem(argv0);
+  if (stem == "cl" || stem == "clang-cl" || stem == "clang" ||
+      stem == "clang++")
+    return false;
+  return (stem.size() >= 3 && stem.compare(stem.size() - 3, 3, "g++") == 0) ||
+         (stem.size() >= 3 && stem.compare(stem.size() - 3, 3, "c++") == 0);
+}
+
+bool run_command(const std::wstring &cmd, std::string &output, DWORD &exit_code,
+                 std::string &error) {
+  std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
+  cmdBuf.push_back(L'\0');
+
+  SECURITY_ATTRIBUTES sa{};
+  sa.nLength = sizeof(sa);
+  sa.bInheritHandle = TRUE;
+
+  HANDLE hReadRaw = INVALID_HANDLE_VALUE;
+  HANDLE hWriteRaw = INVALID_HANDLE_VALUE;
+  if (!CreatePipe(&hReadRaw, &hWriteRaw, &sa, 0)) {
+    error = "CreatePipe failed: " + win::last_error_string();
+    return false;
+  }
+  HandleGuard hRead(hReadRaw);
+  HandleGuard hWrite(hWriteRaw);
+  SetHandleInformation(hRead.get(), HANDLE_FLAG_INHERIT, 0);
+
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESTDHANDLES;
+  si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  si.hStdOutput = si.hStdError = hWrite.get();
+
+  PROCESS_INFORMATION pi{};
+  if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE,
+                      CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr,
+                      &si, &pi)) {
+    error = "CreateProcessW failed: " + win::last_error_string();
+    return false;
+  }
+  HandleGuard hProcess(pi.hProcess);
+  HandleGuard hThread(pi.hThread);
+
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
+  jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  HANDLE job_raw = CreateJobObjectW(nullptr, nullptr);
+  HandleGuard hJob(job_raw);
+  if (!hJob.valid() ||
+      !SetInformationJobObject(hJob.get(), JobObjectExtendedLimitInformation,
+                               &jeli, sizeof(jeli)) ||
+      !AssignProcessToJobObject(hJob.get(), pi.hProcess)) {
+    std::fprintf(stderr, "[compile] warning: %s\n",
+                 win::last_error_string().c_str());
+    hJob.reset();
+  }
+  ResumeThread(pi.hThread);
+
+  hWrite.reset();
+  output = read_pipe(hRead.get());
+
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  GetExitCodeProcess(pi.hProcess, &exit_code);
+  return true;
+}
+
 } // namespace
 
 CompilerResult compile_source(const CompilerOptions &opts) {
@@ -154,60 +220,14 @@ CompilerResult compile_source(const CompilerOptions &opts) {
   cmd += quote_arg(opts.source_path.wstring());
   cmd += L" -o ";
   cmd += quote_arg(opts.output_path.wstring());
-  std::vector<wchar_t> cmdBuf(cmd.begin(), cmd.end());
-  cmdBuf.push_back(L'\0');
 
-  SECURITY_ATTRIBUTES sa{};
-  sa.nLength = sizeof(sa);
-  sa.bInheritHandle = TRUE;
-
-  HANDLE hReadRaw = INVALID_HANDLE_VALUE;
-  HANDLE hWriteRaw = INVALID_HANDLE_VALUE;
-  if (!CreatePipe(&hReadRaw, &hWriteRaw, &sa, 0)) {
-    r.message = "CreatePipe failed: " + win::last_error_string();
-    return r;
-  }
-  HandleGuard hRead(hReadRaw);
-  HandleGuard hWirte(hWriteRaw);
-
-  SetHandleInformation(hRead.get(), HANDLE_FLAG_INHERIT, 0);
-
-  STARTUPINFOW si{};
-  si.cb = sizeof(si);
-  si.dwFlags = STARTF_USESTDHANDLES;
-  si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-  si.hStdOutput = si.hStdError = hWirte.get();
-
-  PROCESS_INFORMATION pi{};
-  if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE,
-                      CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr, nullptr,
-                      &si, &pi)) {
-    r.message = "CreateProcessW failed: " + win::last_error_string();
-    return r;
-  }
-  HandleGuard hProcess(pi.hProcess);
-  HandleGuard hThread(pi.hThread);
-
-  JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
-  jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  HANDLE job_raw = CreateJobObjectW(nullptr, nullptr);
-  HandleGuard hJob(job_raw);
-  if (!hJob.valid() ||
-      !SetInformationJobObject(hJob.get(), JobObjectExtendedLimitInformation,
-                               &jeli, sizeof(jeli)) ||
-      !AssignProcessToJobObject(hJob.get(), pi.hProcess)) {
-    std::fprintf(stderr, "[compile] warning: %s\n",
-                 win::last_error_string().c_str());
-    hJob.reset();
-  }
-  ResumeThread(pi.hThread);
-
-  hWirte.reset();
-  std::string output = read_pipe(hRead.get());
-
-  WaitForSingleObject(pi.hProcess, INFINITE);
+  std::string output;
   DWORD exit_code = 0;
-  GetExitCodeProcess(pi.hProcess, &exit_code);
+  std::string error;
+  if (!run_command(cmd, output, exit_code, error)) {
+    r.message = error;
+    return r;
+  }
 
   const bool exe_exists = std::filesystem::exists(opts.output_path, ec);
   if (exit_code == 0 && exe_exists) {
@@ -219,6 +239,67 @@ CompilerResult compile_source(const CompilerOptions &opts) {
     } else {
       r.message = output;
     }
+  }
+  return r;
+}
+
+CompilerResult precompile_header(const std::vector<std::string> &args,
+                                 const std::filesystem::path &header,
+                                 const std::filesystem::path &output) {
+  CompilerResult r;
+  r.success = false;
+
+  if (args.empty()) {
+    r.message = "no compiler configured";
+    return r;
+  }
+  if (!gcc_style_pch_supported(args[0])) {
+    r.message = "this compiler does not use .gch precompiled headers";
+    return r;
+  }
+
+  std::error_code ec;
+  if (!std::filesystem::exists(header, ec)) {
+    r.message = "Header not found: " + header.string();
+    return r;
+  }
+  if (!output.parent_path().empty()) {
+    std::filesystem::create_directories(output.parent_path(), ec);
+    if (ec) {
+      r.message = "Failed to create output directory: " + ec.message();
+      return r;
+    }
+  }
+
+  std::filesystem::remove(output, ec);
+
+  std::wstring cmd = quote_arg(to_wide(args[0]));
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    cmd += L' ';
+    cmd += quote_arg(to_wide(args[i]));
+  }
+  cmd += L" -x c++-header ";
+  cmd += quote_arg(header.wstring());
+  cmd += L" -o ";
+  cmd += quote_arg(output.wstring());
+
+  std::string text;
+  DWORD exit_code = 0;
+  std::string error;
+  if (!run_command(cmd, text, exit_code, error)) {
+    r.message = error;
+    return r;
+  }
+
+  ec.clear();
+  const bool made = std::filesystem::exists(output, ec);
+  if (exit_code == 0 && made) {
+    r.success = true;
+    r.message = "Success";
+  } else if (text.empty()) {
+    r.message = "Compiler exited: " + win::error_string(exit_code);
+  } else {
+    r.message = text;
   }
   return r;
 }

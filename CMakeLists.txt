@@ -34,6 +34,7 @@ set(CORE_SOURCES
   src/app/interactive_ui.cpp
   src/app/clipboard.cpp
   src/app/program_hook.cpp
+  src/app/pch.cpp
 )
 
 add_library(coding_core STATIC ${CORE_SOURCES})

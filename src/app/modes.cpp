@@ -94,9 +94,11 @@ BuildResult build_step(const AppConfig &cfg, const BuildPaths &paths,
   opt.source_path = paths.source;
   opt.output_path = target == BuildTarget::Probe ? paths.exe_probe : paths.exe;
   opt.args = cfg.args;
+  opt.base = cfg.base;
   opt.cache_path = cfg.cache_path;
   opt.cache_key = paths.key;
   opt.trash_dir = cfg.build_dir / ".trash";
+  opt.pch_dir = cfg.coding_dir / "pch";
   opt.extra_deps.push_back(cfg.config_path);
 
   if (target == BuildTarget::Probe && uses_probe_build(cfg)) {

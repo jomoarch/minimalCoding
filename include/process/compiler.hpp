@@ -20,6 +20,10 @@ struct CompilerResult : ResultBase {};
 
 CompilerResult compile_source(const CompilerOptions &opts);
 
+CompilerResult precompile_header(const std::vector<std::string> &args,
+                                 const std::filesystem::path &header,
+                                 const std::filesystem::path &output);
+
 } // namespace coding
 
 #endif // COMPILER_HPP
