@@ -84,12 +84,7 @@ BuildResult ensure_built(const BuildOption &opts) {
     }
 
     if (!need) {
-      std::error_code source_ec;
-      const auto source_time =
-          std::filesystem::last_write_time(opts.source_path, source_ec);
-      if (!source_ec && exe_time > source_time) {
-        reason = "exe is newer";
-      } else if (!hasher.ready(sha)) {
+      if (!hasher.ready(sha)) {
         need = true;
         reason = "cannot hash the source";
       } else {

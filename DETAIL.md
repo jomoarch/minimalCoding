@@ -4,13 +4,16 @@
 
 ### 什么时候重新编译
 
-三层判定：
+两层判定：
 
 1. `config.toml` 或注入头比 exe 新 → 重编译；
-2. 否则 exe 比源文件新 → **不重编译**（连哈希都不算）；
-3. 否则算源文件的 SHA-256，和 `.cache` 里记的比：一样 → 不重编译（只是 `touch` 了文件、内容没变），不一样或者没有记录 → 重编译。
+2. 否则算源文件的 SHA-256，和 `.cache` 里记的比：一样 → 不重编译，不一样或者没有记录 → 重编译。
 
-`[build]` 那一行会带上原因，路径同样相对 `base`，比如 `[build] up-to-date (.coding\build\src\a.probe.exe, exe is newer)`、`[build] up-to-date (.coding\build\src\a.probe.exe, sha256 matches)`、`[build] built -> .coding\build\src\a.probe.exe (no exe yet)`。
+**源文件只按内容判断，不看修改时间。** 早先还有一条「exe 比源文件新就不重编、连哈希都不算」的快路径，但它建立在 mtime 可信这个假设上，而 mtime 会说谎：`git checkout`、`robocopy /COPY:DAT`、从备份恢复都会保留旧时间戳，结果是内容改了却继续跑旧 exe，而 `[source]` 打印的是新文件，非常难发现。现在源文件一律比哈希——几百 KB 的源码读一遍大约 1 ms。
+
+`extra_deps`（`config.toml`、注入头）仍然按时间比：它们只在你主动改动时需要重编，而那种改动一定伴随 mtime 变化。
+
+`[build]` 那一行会带上原因，路径同样相对 `base`，比如 `[build] up-to-date (.coding\build\src\a.probe.exe, sha256 matches)`、`[build] built -> .coding\build\src\a.probe.exe (sha256 changed)`、`[build] built -> .coding\build\src\a.probe.exe (config.toml is newer)`。
 
 ### 缓存表 `.cache`
 
