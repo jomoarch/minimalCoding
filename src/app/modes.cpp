@@ -249,17 +249,17 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
     std::cout << color::err(run.crash_text) << '\n';
   }
 
-  if (cfg.single_output.empty()) {
+  std::string single_output = show_relative(cfg.base, cfg.single_output);
+  if (single_output.empty()) {
     std::cout << "[save] [io].single_output is not configured, nothing saved\n";
-  } else if (prompt::ask_save(cfg.single_output, "output")) {
+  } else if (prompt::ask_save(single_output, "output")) {
     if (write_text(cfg.single_output, run.captured)) {
       std::cout << color::ok("[save] saved ", run.captured.size(),
-                             " byte(s) -> ", cfg.single_output)
+                             " byte(s) -> ", single_output)
                 << "\n";
       out.saved_output = true;
     } else {
-      std::cerr << color::err("[save] Failed to write ", cfg.single_output)
-                << "\n";
+      std::cerr << color::err("[save] Failed to write ", single_output) << "\n";
       out.code = 2;
       return out;
     }
@@ -269,17 +269,18 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
     out.code = run.result.status == RunnerStatus::Success ? 0 : 1;
     return out;
   }
+
+  std::string single_input = show_relative(cfg.base, cfg.single_input);
   if (run.user_input.empty()) {
     std::cout << "[save] your input is empty, nothing saved\n";
-  } else if (prompt::ask_save(cfg.single_input, "input")) {
+  } else if (prompt::ask_save(single_input, "input")) {
     if (write_text(cfg.single_input, run.user_input)) {
       std::cout << color::ok("[save] saved ", run.user_input.size(),
-                             " byte(s) -> ", cfg.single_input)
+                             " byte(s) -> ", single_input)
                 << "\n";
       out.saved_input = true;
     } else {
-      std::cerr << color::err("[save] Failed to write ", cfg.single_input)
-                << "\n";
+      std::cerr << color::err("[save] Failed to write ", single_input) << "\n";
       out.code = 2;
       return out;
     }
