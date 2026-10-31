@@ -7,6 +7,7 @@
 #include "base/path.hpp"
 #include "process/compiler.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -151,7 +152,10 @@ BuildResult ensure_built(const BuildOption &opts) {
   co.args = opts.args;
   co.inject_header = opts.inject_header;
 
+  const auto compile_start = std::chrono::steady_clock::now();
   auto cr = compile_source(co);
+  r.compile_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - compile_start);
   r.success = cr.success;
   r.rebuilt = true;
   r.reason = reason;

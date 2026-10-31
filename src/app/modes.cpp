@@ -118,15 +118,17 @@ void print_build_line(const AppConfig &cfg, const std::filesystem::path &exe,
 
   const std::string shown = show_relative(cfg.base, exe);
   if (s.rebuilt) {
-    std::cout << "[build] built -> " << shown;
+    std::cout << "[build] built -> " << shown << " (" << s.compile_time.count()
+              << " ms";
+    if (!s.reason.empty())
+      std::cout << ", " << s.reason;
+    std::cout << ')';
   } else {
     std::cout << "[build] up-to-date (" << shown;
     if (!s.reason.empty())
       std::cout << ", " << s.reason;
     std::cout << ')';
   }
-  if (s.rebuilt && !s.reason.empty())
-    std::cout << " (" << s.reason << ')';
   std::cout << '\n';
 }
 

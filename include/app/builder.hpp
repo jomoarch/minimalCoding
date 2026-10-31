@@ -1,6 +1,7 @@
 #ifndef BUILDER_HPP
 #define BUILDER_HPP
 
+#include <chrono>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -27,6 +28,8 @@ struct BuildOption {
 struct BuildResult {
   bool success{false};
   bool rebuilt{false};
+
+  std::chrono::milliseconds compile_time{0};
   std::string message;
   std::string reason;
 

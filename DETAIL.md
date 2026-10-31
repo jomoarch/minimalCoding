@@ -13,7 +13,15 @@
 
 `extra_deps`（`config.toml`、注入头）仍然按时间比：它们只在你主动改动时需要重编，而那种改动一定伴随 mtime 变化。
 
-`[build]` 那一行会带上原因，路径同样相对 `base`，比如 `[build] up-to-date (.coding\build\src\a.probe.exe, sha256 matches)`、`[build] built -> .coding\build\src\a.probe.exe (sha256 changed)`、`[build] built -> .coding\build\src\a.probe.exe (config.toml is newer)`。
+`[build]` 那一行会带上**编译耗时**和原因，路径同样相对 `base`：
+
+```
+[build] built -> .coding\build\src\a.probe.exe (1662 ms, sha256 changed)
+[build] built -> .coding\build\src\a.probe.exe (1645 ms, forced)
+[build] up-to-date (.coding\build\src\a.probe.exe, sha256 matches)
+```
+
+耗时只算"调用编译器"这一步（不含算哈希、删旧 exe、写缓存），没重编时不打印。它主要用来回答"那 1.6 秒花在哪"——比如判断值不值得开保存即编译，或者 `-O2` 到底贵多少。
 
 ### 缓存表 `.cache`
 
