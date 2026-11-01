@@ -1,6 +1,15 @@
 # Coding
 
 这是一个面向 Windows OIer 的**编译+运行**工具，支持 `interactive` 模式和 `signle` 模式，使用前请确保机器上装有 `g++`。
+
+它与 `CPH` 有部分重合，舍弃了 Special Judge、批量测试和文件对比，有以下优点：
+1. 按照 SHA-256 增量编译，`probe.h` 预编译为 `.gch` 文件节省编译时间
+2. interactive 式的运行
+3. 严格保证输出顺序的 stdout-stderr 分离
+4. 实时的带颜色的 stdout-stderr 区分
+5. linedit 行编辑器能较好地处理瞬间的大量输入
+6. 实时的 status_line 便于判断 interactive 下程序状态
+
 > 它不判题。
 
 ## 环境搭建
