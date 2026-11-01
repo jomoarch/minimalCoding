@@ -1,7 +1,17 @@
 # Coding
 
-这是一个面向 Windows OIer 的**编译+运行**工具，支持 `interactive` 模式和 `signle` 模式。
+这是一个面向 Windows OIer 的**编译+运行**工具，支持 `interactive` 模式和 `signle` 模式，使用前请确保机器上装有 `g++`。
 > 它不判题。
+
+## 环境搭建
+
+`g++` 请自行解决。
+
+你可以将 `config.toml` 文件放在 `cg_*` 文件的同目录下，或在`cg_*` 同目录下使用 `config.link` 链接 `config.toml`。
+
+搭建环境时需要指定 `probe.h` 路径，可以将其放在 `.inject/probe.h`，若不想使用 `probe.h` 分离 stdout 和 stderr，请将 `[inject].enabled` 设为 `false`。
+
+
 
 ## 可执行文件一览
 
