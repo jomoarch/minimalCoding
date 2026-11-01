@@ -29,6 +29,8 @@ struct SingleRunOption {
 
   std::function<std::size_t(char *buf, std::size_t n)> stdin_source;
   std::function<void()> stdin_cancel;
+
+  std::filesystem::path output_file;
   std::function<void(const char *data, std::size_t n, bool is_stderr)>
       on_output;
   std::function<void(void *job, void *process)> on_started;

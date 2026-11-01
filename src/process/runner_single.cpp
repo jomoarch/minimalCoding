@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <string_view>
@@ -24,6 +25,16 @@ inline constexpr char kFramedStdout = '\x01';
 inline constexpr char kFramedStderr = '\x02';
 
 std::mutex g_console_mutex;
+
+void write_styled(std::ostream &out, bool colorize, const color::Style *style,
+                  const char *data, std::size_t n) {
+  if (n == 0)
+    return;
+  if (colorize && style)
+    out << (*style)(std::string_view(data, n));
+  else
+    out.write(data, static_cast<std::streamsize>(n));
+}
 
 void write_styled(bool colorize, const color::Style *style, const char *data,
                   std::size_t n) {
@@ -57,14 +68,21 @@ struct Sink {
   const color::Style *err_style{nullptr};
   std::function<void(const char *, std::size_t, bool)> on_output;
 
+  std::ofstream *out_file{nullptr};
+
   void write(const char *data, std::size_t n, bool is_stderr) const {
     if (on_output) {
       on_output(data, n, is_stderr);
       return;
     }
+    const color::Style *style = is_stderr ? err_style : out_style;
+    if (out_file != nullptr) {
+      write_styled(*out_file, colorize, style, data, n);
+      return;
+    }
     if (!echo)
       return;
-    write_styled(colorize, is_stderr ? err_style : out_style, data, n);
+    write_styled(colorize, style, data, n);
   }
 };
 
@@ -231,6 +249,7 @@ struct OutputContext {
   Sink sink;
   std::string captured;
   std::string raw_err;
+  std::ofstream file;
   std::unique_ptr<TagSplitter> splitter;
   std::thread pump;
   ~OutputContext() {
@@ -407,6 +426,7 @@ void start_output_pump(const SingleRunOption &opts, const PipeSet &pipes,
                        OutputContext &ctx) {
   ctx.sink.echo = opts.echo;
   ctx.sink.colorize = opts.colorize_output;
+  ctx.sink.out_file = ctx.file.is_open() ? &ctx.file : nullptr;
   ctx.sink.out_style = &ctx.stdout_style;
   ctx.sink.err_style = &ctx.stderr_style;
   ctx.sink.on_output = opts.on_output;
@@ -576,6 +596,9 @@ void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
   if (opts.tagged_stream && !ctx.raw_err.empty())
     out.crash_text = tail_of_stderr(ctx.raw_err, kMaxCrashText);
 
+  if (ctx.file.is_open())
+    ctx.file.flush();
+
   if (opts.tagged_stream && ctx.splitter && ctx.splitter->bytes() > 0 &&
       !ctx.splitter->saw_tag())
     out.warning =
@@ -611,6 +634,12 @@ SingleRunResult run_single(const SingleRunOption &opts) {
     opts.on_started(child.process.get(), hJob.get());
 
   OutputContext ctx;
+  if (!opts.output_file.empty()) {
+    std::error_code ec;
+    if (!opts.output_file.parent_path().empty())
+      std::filesystem::create_directories(opts.output_file.parent_path(), ec);
+    ctx.file.open(opts.output_file, std::ios::binary | std::ios::trunc);
+  }
   start_output_pump(opts, pipes, ctx);
 
   std::atomic<bool> stdin_stop{false};

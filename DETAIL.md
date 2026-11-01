@@ -101,6 +101,26 @@ cmake -S . -B build -DMINIMALCODING_STATIC_RUNTIME=OFF
 2. **按需编译**（见下文「什么时候重新编译」）。
 3. **运行**。产物和运行目录全部在 `<base>/.coding/` 下。
 
+### 输出太大时
+
+`cg_s` **不边跑边打印**：子进程的 stdout/stderr 先落盘到 `<base>/.coding/last_output.txt`（开了染色的话连同 ANSI 序列一起），跑完再看这个文件多大。
+
+- 不超过 `[io].echo_limit_kb`（默认 **256**，`0` 表示不限）→ 直接打出来，位置和以前一样（在 `[result]` 之前），然后删掉文件；
+- 超过 → 只报总量、问一句：
+
+```
+--- output ---
+
+--------------------------------------------------
+[result] cpu 78 ms wall 104 ms mem 7.30 MB  success
+[output] 1015.62 KB in total
+Show it? [y/N]
+```
+
+回答 `y` / `yes` 才打印（打完就删）；否则那 1 MB 就留在 `.coding\last_output.txt`，并把路径告诉你——屏幕上看不完，留着还能用编辑器翻。
+
+只影响**显示**：`[io].single_output` 保存的内容、`[result]` 都不受影响；`cg_i` 也不走这条路（交互模式必须实时看输出）。
+
 ### stdout / stderr 的分离
 
 两条独立管道**无法**保证 stdout 和 stderr 的先后顺序，先写的那一路可能后到。所以 `cg_s` / `cg_i` 换了个做法：
@@ -133,14 +153,15 @@ cmake -S . -B build -DMINIMALCODING_STATIC_RUNTIME=OFF
 
 ### `.coding/` 结构
 
-| 路径                                          | 内容                               |
-| --------------------------------------------- | ---------------------------------- |
-| `.coding/build/<相对目录>/<文件名>.exe`       | 原版可执行文件                     |
-| `.coding/build/<相对目录>/<文件名>.probe.exe` | 注入版可执行文件（默认跑的就是它） |
-| `.coding/build/.cache`                        | 构建缓存表                         |
-| `.coding/build/.trash/`                       | 删不掉的旧 exe 挪到这里            |
-| `.coding/pch/<参数哈希>/`                     | 注入头的预编译副本 + `.gch`        |
-| `.coding/work/`                               | 运行目录                           |
+| 路径                                          | 内容                                    |
+| --------------------------------------------- | --------------------------------------- |
+| `.coding/build/<相对目录>/<文件名>.exe`       | 原版可执行文件                          |
+| `.coding/build/<相对目录>/<文件名>.probe.exe` | 注入版可执行文件（默认跑的就是它）      |
+| `.coding/build/.cache`                        | 构建缓存表                              |
+| `.coding/build/.trash/`                       | 删不掉的旧 exe 挪到这里                 |
+| `.coding/pch/<参数哈希>/`                     | 注入头的预编译副本 + `.gch`             |
+| `.coding/last_output.txt`                     | `cg_s` 本次输出；显示完就删，没显示才留 |
+| `.coding/work/`                               | 运行目录                                |
 
 **产物按源文件相对 `base` 的目录结构摆放**，`<文件名>` 是源文件去掉 `.cpp` 之后的名字。所以两个同名源文件各有各的产物，不会再互相覆盖：
 

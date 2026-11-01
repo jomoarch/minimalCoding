@@ -21,6 +21,7 @@ single_output = "output"
 merge_stderr = false
 print_input = false
 colorize_output = true
+echo_limit_kb = 256
 
 [daemon]
 interactive = "Ctrl+Alt+I"

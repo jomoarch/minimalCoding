@@ -195,12 +195,44 @@ std::string indent_lines(std::string_view text, const char *prefix) {
   return out;
 }
 
+std::uintmax_t file_size_of(const std::filesystem::path &path) {
+  std::error_code ec;
+  if (path.empty() || !std::filesystem::exists(path, ec))
+    return 0;
+  const auto size = std::filesystem::file_size(path, ec);
+  return ec ? 0 : size;
+}
+
+void stream_file(const std::filesystem::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in)
+    return;
+  char buf[65536];
+  while (in) {
+    in.read(buf, sizeof buf);
+    const std::streamsize got = in.gcount();
+    if (got > 0)
+      std::cout.write(buf, got);
+  }
+  std::cout.flush();
+}
+
 ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
-                          bool is_interactive) {
+                          bool is_interactive,
+                          const std::filesystem::path &output_file = {}) {
   ModeOutcome out;
 
   if (!run.warning.empty())
     std::cerr << color::warn("[probe] ", run.warning) << "\n";
+
+  const std::uintmax_t output_size = file_size_of(output_file);
+  const bool output_big =
+      cfg.echo_limit_bytes != 0 && output_size > cfg.echo_limit_bytes;
+  if (!output_big && output_size != 0) {
+    stream_file(output_file);
+    std::error_code ec;
+    std::filesystem::remove(output_file, ec);
+  }
 
   auto status = [&]() -> std::string {
     switch (run.result.status) {
@@ -247,6 +279,22 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
     }
   } else if (!run.crash_text.empty()) {
     std::cout << color::err(run.crash_text) << '\n';
+  }
+
+  if (output_big) {
+    std::cout << '\n'
+              << color::info("[output] ") << format_memory(output_size)
+              << " in total\n";
+    if (prompt::ask_yes_no("Show it?")) {
+      std::cout << '\n';
+      stream_file(output_file);
+      std::error_code ec;
+      std::filesystem::remove(output_file, ec);
+    } else {
+      // 没显示就留着，那是它的唯一一份。
+      std::cout << "[output] kept at " << show_relative(cfg.base, output_file)
+                << "\n";
+    }
   }
 
   std::string single_output = show_relative(cfg.base, cfg.single_output);
@@ -414,6 +462,8 @@ ModeOutcome run_single_file(const AppConfig &cfg) {
   opt.colorize_output = cfg.colorize_output;
   opt.tagged_stream = uses_probe_build(cfg);
   opt.merge_stderr = cfg.merge_stderr == 1;
+  const std::filesystem::path output_file = cfg.coding_dir / "last_output.txt";
+  opt.output_file = output_file;
   opt.time_limit_ms = cfg.time_limit;
   opt.memory_limit_bytes = cfg.memory_limit_bytes;
 
@@ -421,7 +471,8 @@ ModeOutcome run_single_file(const AppConfig &cfg) {
     app::report_program_started(process);
   };
 
-  const ModeOutcome finished = finish_single(cfg, run_single(opt), false);
+  const ModeOutcome finished =
+      finish_single(cfg, run_single(opt), false, output_file);
   out.code = finished.code;
   out.saved_input = finished.saved_input;
   out.saved_output = finished.saved_output;
