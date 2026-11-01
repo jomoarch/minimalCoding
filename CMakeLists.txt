@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.16)
 project(minimalCoding LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(NOT WIN32)
   message(FATAL_ERROR "This project only supports Windows.")
 endif()
+
+option(MINIMALCODING_STATIC_RUNTIME "Link the C/C++ runtime statically" ON)
 
 enable_language(RC)
 set(APP_ICON_RC ${CMAKE_CURRENT_SOURCE_DIR}/resource/icon/mahjong.rc)
@@ -69,6 +71,15 @@ foreach(app cg_s cg_i cg_t)
   set_target_properties(${app} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin
   )
+
+  if(MINIMALCODING_STATIC_RUNTIME)
+    if(MSVC)
+      set_property(TARGET ${app} PROPERTY MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    else()
+      target_link_options(${app} PRIVATE -static)
+    endif()
+  endif()
 endforeach()
 
 if(MSVC)

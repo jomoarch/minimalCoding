@@ -26,6 +26,8 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
+默认把 C/C++ 运行库**静态链接**进 exe，所以 `bin\*.exe` 拷到没装 MinGW 的机器上也能直接跑。想要动态链接：`cmake -S . -B build -DMINIMALCODING_STATIC_RUNTIME=OFF`。
+
 因为 `cg_i` 接管了控制台的输入，控制台自己那套行编辑（退格、Ctrl+V 粘贴、历史）就不再生效了，
 所以这些由我们自己实现：
 

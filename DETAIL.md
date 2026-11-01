@@ -40,6 +40,26 @@
 [build] built -> .coding\build\a.probe.exe (451 ms, no exe yet)
 ```
 
+### 静态链接运行库
+
+三个 exe 默认把 C/C++ 运行库**静态链接**进去（GCC 是 `-static`，MSVC 是 `/MT`）。所以 `bin\*.exe` 拷到**没装过 MinGW 的机器**上也能直接跑。
+
+动态链接时它们会依赖这三个 DLL，而这三样只有装了 MSYS2/MinGW 的机器才有：
+
+```
+libstdc++-6.dll
+libgcc_s_seh-1.dll
+libwinpthread-1.dll
+```
+
+想换回动态链接：
+
+```
+cmake -S . -B build -DMINIMALCODING_STATIC_RUNTIME=OFF
+```
+
+这个选项只作用于**可执行文件**——静态库（`coding_core`、`linedit_core`）本身不链接运行库，加不加都一样。
+
 ### 缓存表 `.cache`
 
 纯文本，一行一条，最近的排在最上面。键是**源文件相对 `base` 的路径**，不是文件名 —— 否则两个同名源文件会互相顶掉缓存记录：
