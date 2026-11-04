@@ -342,6 +342,7 @@ ConfigResult load_config(const std::filesystem::path &path) {
                         [](bool v) { return v ? 1 : 0; });
     read_field(t, "print_input", c.print_input);
     read_field(t, "colorize_output", c.colorize_output);
+    read_field(t, "always_output", c.always_output);
     read_field_as<int64_t>(
         t, "echo_limit_kb", c.echo_limit_bytes,
         [](int64_t v) { return static_cast<std::size_t>(v) * 1024; });
