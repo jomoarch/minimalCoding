@@ -228,8 +228,7 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
   const std::uintmax_t output_size = file_size_of(output_file);
   const bool output_big =
       cfg.echo_limit_bytes != 0 && output_size > cfg.echo_limit_bytes;
-
-  if ((!output_big && output_size != 0) || cfg.always_output) {
+  if (!output_big && output_size != 0) {
     stream_file(output_file);
     std::error_code ec;
     std::filesystem::remove(output_file, ec);
@@ -282,7 +281,7 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
     std::cout << color::err(run.crash_text) << '\n';
   }
 
-  if (!cfg.always_output && output_big) {
+  if (output_big) {
     std::cout << '\n'
               << color::info("[output] ") << format_memory(output_size)
               << " in total\n";
@@ -292,6 +291,7 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
       std::error_code ec;
       std::filesystem::remove(output_file, ec);
     } else {
+      // 没显示就留着，那是它的唯一一份。
       std::cout << "[output] kept at " << show_relative(cfg.base, output_file)
                 << "\n";
     }

@@ -39,7 +39,6 @@ struct AppConfig {
   int merge_stderr{-1};
   bool print_input{false};
   bool colorize_output{true};
-  bool always_output{false};
   std::size_t echo_limit_bytes{256u * 1024u};
 
   // build
