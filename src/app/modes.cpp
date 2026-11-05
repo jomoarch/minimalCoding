@@ -291,7 +291,6 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
       std::error_code ec;
       std::filesystem::remove(output_file, ec);
     } else {
-      // 没显示就留着，那是它的唯一一份。
       std::cout << "[output] kept at " << show_relative(cfg.base, output_file)
                 << "\n";
     }

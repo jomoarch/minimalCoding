@@ -115,7 +115,6 @@ cg_t --stop
 | `[io].colorize_output`     | 是否给程序自身输出染色（默认 `true`）                                                                                            |
 | `[io].merge_stderr`        | 是否把 stderr 也写进输出文件；不写就各自维持现状（见上文「stderr 要不要进输出文件」）                                            |
 | `[io].print_input`         | 回显时是否先把输入打出来；默认 `false`                                                                                           |
-| `[io].always_output`       | 是否不询问直接输出全部程序输出；默认 `false`                                                                                     |
 | `[io].echo_limit_kb`       | 输出超过这么多 KB 就不打印，跑完再问要不要看；`0` 表示不限（默认 `256`）                                                         |
 | `[daemon].interactive`     | `cg_t` 触发交互模式的热键，默认 `Ctrl+Alt+I`；留空关掉                                                                           |
 | `[daemon].single`          | `cg_t` 触发单文件模式的热键，默认 `Ctrl+Alt+S`；留空关掉                                                                         |
