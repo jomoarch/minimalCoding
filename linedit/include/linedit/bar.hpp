@@ -37,6 +37,9 @@ public:
 
   void paint();
 
+  bool input_visible() const;
+  void reveal_input();
+
 private:
   struct Pos {
     int row{0};

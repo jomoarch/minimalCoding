@@ -172,6 +172,59 @@ bool Bar::bar_visible() const {
          anchor_.row <= info.srWindow.Bottom;
 }
 
+bool Bar::input_visible() const {
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+  if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
+    return true;
+  const Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+  const int last = anchor_.row + static_cast<int>(laid.rows.size()) - 1;
+  return anchor_.row >= info.srWindow.Top && last <= info.srWindow.Bottom;
+}
+
+void Bar::reveal_input() {
+  if (!active_)
+    return;
+
+  HANDLE h = static_cast<HANDLE>(output_);
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+  if (!GetConsoleScreenBufferInfo(h, &info))
+    return;
+
+  const Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+  const int area = static_cast<int>(laid.rows.size());
+  if (area <= 0)
+    return;
+
+  ensure_room(static_cast<std::size_t>(area));
+  if (!GetConsoleScreenBufferInfo(h, &info))
+    return;
+
+  const int height = info.srWindow.Bottom - info.srWindow.Top + 1;
+  if (height <= 0)
+    return;
+
+  const int status_row = anchor_.row + area;
+  int top = status_row - (height - 1);
+
+  if (top < 0)
+    top = 0;
+  if (top > info.dwSize.Y - height)
+    top = info.dwSize.Y - height;
+  if (top < 0)
+    top = 0;
+
+  if (top == info.srWindow.Top)
+    return;
+
+  SMALL_RECT win = info.srWindow;
+  win.Top = static_cast<SHORT>(top);
+  win.Bottom = static_cast<SHORT>(top + height - 1);
+  if (SetConsoleWindowInfo(h, TRUE, &win))
+    painted_ = false;
+}
+
 void Bar::flush_pending() {
   if (pending_.empty())
     return;

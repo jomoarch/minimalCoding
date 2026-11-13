@@ -192,9 +192,21 @@ bool run(const AppConfig &cfg, const SingleRunOption &base,
     char32_t ch = 0;
     bool got = session.read_any(key, ch, tick);
     for (int i = 0; got && i < kMaxKeysPerPass; ++i) {
+      if (key != linedit::Key::Resize && key != linedit::Key::Paste &&
+          ch != 0x03 && ch != 0x04 && !bar.input_visible()) {
+        bar.reveal_input();
+        if (bar.input_visible()) {
+          bar.paint();
+          got = session.read_any(key, ch, 0);
+          continue;
+        }
+      }
+
       if (key == linedit::Key::Resize) {
         bar.resize();
       } else if (key == linedit::Key::Paste) {
+        if (!bar.input_visible())
+          bar.reveal_input();
         submit_paste(clipboard::text(), editor, shared, bar);
       } else {
         const linedit::Outcome action = editor.feed(key, ch);
