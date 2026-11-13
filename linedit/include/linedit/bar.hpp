@@ -39,11 +39,16 @@ private:
 
   void place(const Pos &at) const;
   void write_bytes(std::string_view bytes) const;
-  bool cursor_now(Pos &out, int &window_top) const;
+  bool cursor_now(Pos &out) const;
   void erase_ours();
   void hide_cursor();
   void show_cursor();
   void ensure_room(std::size_t echo_rows);
+  void append_fresh();
+  bool bar_visible() const;
+  void flush_pending();
+  void refresh_geometry(std::size_t window_rows, std::size_t window_columns,
+                        int buffer_width);
   bool skip_for_selection() const;
 
   void *input_{nullptr};
@@ -51,8 +56,11 @@ private:
   bool active_{false};
   std::size_t rows_{0};
   std::size_t columns_{0};
+  int buffer_width_{0};
+  bool layout_lost_{false};
 
   Pos anchor_{};
+  std::string pending_;
   std::string input_text_;
   std::size_t input_cursor_bytes_{0};
   std::string status_text_;
