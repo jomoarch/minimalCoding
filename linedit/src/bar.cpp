@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
 
 namespace linedit {
@@ -14,6 +15,7 @@ namespace {
 constexpr std::size_t kMinRows = 4;
 constexpr std::size_t kMinColumns = 12;
 constexpr std::size_t kMaxPending = 64u << 20;
+constexpr auto kSettleDelay = std::chrono::milliseconds(200);
 
 void raw_write(HANDLE h, std::string_view bytes) {
   std::size_t done = 0;
@@ -44,7 +46,7 @@ bool Bar::open(Session &session, std::string &error) {
 
   const Size size = session.size();
   if (size.rows < kMinRows || size.columns < kMinColumns) {
-    error = "the terminal is too small for a status line";
+    error = "the terminal is too small for the input line";
     return false;
   }
   rows_ = size.rows;
@@ -108,6 +110,8 @@ bool Bar::skip_for_selection() const {
   return (info.dwFlags & CONSOLE_SELECTION_IN_PROGRESS) != 0;
 }
 
+bool Bar::settling() const noexcept { return settling_; }
+
 void Bar::erase_ours() {
   if (!active_)
     return;
@@ -147,16 +151,6 @@ void Bar::show_cursor() {
   write_bytes("\x1b[?25h");
 }
 
-void Bar::refresh_geometry(std::size_t window_rows, std::size_t window_columns,
-                           int buffer_width) {
-  rows_ = window_rows;
-  columns_ = window_columns;
-
-  if (buffer_width_ != 0 && buffer_width != buffer_width_)
-    layout_lost_ = true;
-  buffer_width_ = buffer_width;
-}
-
 void Bar::recover_anchor() {
   Pos at{};
   if (!cursor_now(at))
@@ -174,7 +168,6 @@ bool Bar::bar_visible() const {
   CONSOLE_SCREEN_BUFFER_INFO info{};
   if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
     return true;
-
   return anchor_.row >= info.srWindow.Top &&
          anchor_.row <= info.srWindow.Bottom;
 }
@@ -201,7 +194,7 @@ void Bar::write_output(std::string_view data) {
   if (!active_ || data.empty())
     return;
 
-  if (skip_for_selection() || !bar_visible()) {
+  if (skip_for_selection() || settling() || !bar_visible()) {
     if (pending_.size() + data.size() <= kMaxPending)
       pending_.append(data);
     painted_ = false;
@@ -235,7 +228,7 @@ void Bar::commit_text(std::string_view text) {
   if (!active_ || text.empty())
     return;
 
-  if (skip_for_selection() || !bar_visible()) {
+  if (skip_for_selection() || settling() || !bar_visible()) {
     if (pending_.size() + text.size() + 1 <= kMaxPending) {
       pending_.append(text);
       if (text.back() != '\n')
@@ -267,15 +260,13 @@ void Bar::commit_text(std::string_view text) {
   paint();
 }
 
-void Bar::resize() {
-  if (!active_)
-    return;
-  painted_ = false;
-  paint();
-}
+void Bar::resize() { painted_ = false; }
 
 void Bar::ensure_room(std::size_t echo_rows) {
   const int need = static_cast<int>(echo_rows) + 1;
+  if (need <= 0)
+    return;
+
   HANDLE h = static_cast<HANDLE>(output_);
   CONSOLE_SCREEN_BUFFER_INFO info{};
   if (!GetConsoleScreenBufferInfo(h, &info))
@@ -292,12 +283,14 @@ void Bar::ensure_room(std::size_t echo_rows) {
         !GetConsoleScreenBufferInfo(h, &info) || last >= info.dwSize.Y)
       return;
   }
+
   int shift = last - info.srWindow.Bottom;
   const int room = info.dwSize.Y - 1 - info.srWindow.Bottom;
   if (shift > room)
     shift = room;
   if (shift <= 0)
     return;
+
   SMALL_RECT win = info.srWindow;
   win.Top = static_cast<SHORT>(win.Top + shift);
   win.Bottom = static_cast<SHORT>(win.Bottom + shift);
@@ -309,6 +302,7 @@ void Bar::ensure_room(std::size_t echo_rows) {
       push = 1;
     for (int i = 0; i < push; ++i)
       write_bytes("\r\n");
+
     CONSOLE_SCREEN_BUFFER_INFO after{};
     if (GetConsoleScreenBufferInfo(h, &after))
       anchor_.row = after.srWindow.Bottom - need + 1;
@@ -330,10 +324,34 @@ void Bar::paint() {
   if (!GetConsoleScreenBufferInfo(h, &info))
     return;
 
-  refresh_geometry(
-      static_cast<std::size_t>(info.srWindow.Bottom - info.srWindow.Top + 1),
-      static_cast<std::size_t>(info.srWindow.Right - info.srWindow.Left + 1),
-      info.dwSize.X);
+  const std::size_t win_rows =
+      static_cast<std::size_t>(info.srWindow.Bottom - info.srWindow.Top + 1);
+  const std::size_t win_cols =
+      static_cast<std::size_t>(info.srWindow.Right - info.srWindow.Left + 1);
+
+  if (win_rows != rows_ || win_cols != columns_ ||
+      info.dwSize.X != buffer_width_) {
+    if (buffer_width_ != 0 && info.dwSize.X != buffer_width_)
+      width_changed_ = true;
+    buffer_width_ = info.dwSize.X;
+    rows_ = win_rows;
+    columns_ = win_cols;
+    settling_ = true;
+    settle_until_ = std::chrono::steady_clock::now() + kSettleDelay;
+    return;
+  }
+
+  if (settling_) {
+    if (std::chrono::steady_clock::now() < settle_until_)
+      return;
+    settling_ = false;
+    if (width_changed_) {
+      width_changed_ = false;
+      layout_lost_ = true;
+    }
+    painted_ = false;
+    ensure_room(1);
+  }
 
   bool reflowed = false;
   if (layout_lost_) {
@@ -372,14 +390,12 @@ void Bar::paint() {
 
   hide_cursor();
 
-  if (echo_changed) {
-    for (std::size_t i = 0; i < laid.rows.size(); ++i) {
-      if (!place(Pos{anchor_.row + static_cast<int>(i),
-                     i == 0 ? anchor_.column : 0}))
-        break;
-      write_bytes(laid.rows[i]);
-      write_bytes("\x1b[K");
-    }
+  for (std::size_t i = 0; i < laid.rows.size(); ++i) {
+    if (!place(Pos{anchor_.row + static_cast<int>(i),
+                   i == 0 ? anchor_.column : 0}))
+      break;
+    write_bytes(laid.rows[i]);
+    write_bytes("\x1b[K");
   }
 
   if (status_changed) {

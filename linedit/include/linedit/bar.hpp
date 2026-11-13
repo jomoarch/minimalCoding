@@ -1,17 +1,23 @@
 #ifndef LINEDIT_BAR_HPP
 #define LINEDIT_BAR_HPP
 
+#include "linedit/key.hpp"
 #include "linedit/session.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <string_view>
+
 namespace linedit {
+
+class Editor;
 
 class Bar {
 public:
   Bar() = default;
   ~Bar();
+
   Bar(const Bar &) = delete;
   Bar &operator=(const Bar &) = delete;
 
@@ -47,9 +53,8 @@ private:
   void recover_anchor();
   bool bar_visible() const;
   void flush_pending();
-  void refresh_geometry(std::size_t window_rows, std::size_t window_columns,
-                        int buffer_width);
   bool skip_for_selection() const;
+  bool settling() const noexcept;
 
   void *input_{nullptr};
   void *output_{nullptr};
@@ -58,6 +63,9 @@ private:
   std::size_t columns_{0};
   int buffer_width_{0};
   bool layout_lost_{false};
+  bool settling_{false};
+  bool width_changed_{false};
+  std::chrono::steady_clock::time_point settle_until_{};
 
   Pos anchor_{};
   std::string pending_;
