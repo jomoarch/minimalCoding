@@ -37,14 +37,14 @@ private:
     int column{0};
   };
 
-  void place(const Pos &at) const;
+  bool place(const Pos &at) const;
   void write_bytes(std::string_view bytes) const;
   bool cursor_now(Pos &out) const;
   void erase_ours();
   void hide_cursor();
   void show_cursor();
   void ensure_room(std::size_t echo_rows);
-  void append_fresh();
+  void recover_anchor();
   bool bar_visible() const;
   void flush_pending();
   void refresh_geometry(std::size_t window_rows, std::size_t window_columns,

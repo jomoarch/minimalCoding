@@ -76,16 +76,16 @@ void Bar::close() noexcept {
   show_cursor();
 }
 
-void Bar::place(const Pos &at) const {
+bool Bar::place(const Pos &at) const {
   CONSOLE_SCREEN_BUFFER_INFO info{};
   if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
-    return;
+    return false;
   if (at.row < 0 || at.row >= info.dwSize.Y)
-    return;
+    return false;
   const int column =
       std::min<int>(std::max<int>(0, at.column), info.dwSize.X - 1);
   const COORD target{static_cast<SHORT>(column), static_cast<SHORT>(at.row)};
-  SetConsoleCursorPosition(static_cast<HANDLE>(output_), target);
+  return SetConsoleCursorPosition(static_cast<HANDLE>(output_), target) != 0;
 }
 
 void Bar::write_bytes(std::string_view bytes) const {
@@ -157,17 +157,16 @@ void Bar::refresh_geometry(std::size_t window_rows, std::size_t window_columns,
   buffer_width_ = buffer_width;
 }
 
-void Bar::append_fresh() {
+void Bar::recover_anchor() {
   Pos at{};
   if (!cursor_now(at))
     return;
-  place(at);
-  write_bytes("\r\n");
-
-  Pos after{};
-  if (!cursor_now(after))
-    return;
-  anchor_ = after;
+  const Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+  const int row = at.row - static_cast<int>(laid.caret_row);
+  const int column = at.column - static_cast<int>(laid.caret_column);
+  anchor_.row = std::max(0, row);
+  anchor_.column = std::max(0, column);
   painted_ = false;
 }
 
@@ -277,34 +276,47 @@ void Bar::resize() {
 
 void Bar::ensure_room(std::size_t echo_rows) {
   const int need = static_cast<int>(echo_rows) + 1;
+  HANDLE h = static_cast<HANDLE>(output_);
   CONSOLE_SCREEN_BUFFER_INFO info{};
-  if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
+  if (!GetConsoleScreenBufferInfo(h, &info))
     return;
 
-  const int bottom = info.srWindow.Bottom;
   const int last = anchor_.row + need - 1;
-  if (last <= bottom && last < info.dwSize.Y)
+  if (last <= info.srWindow.Bottom)
     return;
 
-  erase_ours();
-  place(Pos{bottom, 0});
-  int push = last - bottom;
-  if (push < 1)
-    push = 1;
-  for (int i = 0; i < push; ++i)
-    write_bytes("\r\n");
-
-  CONSOLE_SCREEN_BUFFER_INFO after{};
-  if (GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &after)) {
-    anchor_.row = after.srWindow.Bottom - need + 1;
-    buffer_width_ = after.dwSize.X;
-  } else {
-    anchor_.row += push;
+  if (last >= info.dwSize.Y) {
+    COORD size = info.dwSize;
+    size.Y = static_cast<SHORT>(std::min<int>(last + 1, 32000));
+    if (!SetConsoleScreenBufferSize(h, size) ||
+        !GetConsoleScreenBufferInfo(h, &info) || last >= info.dwSize.Y)
+      return;
   }
-  if (anchor_.row < 0)
-    anchor_.row = 0;
-  anchor_.column = 0;
-  painted_ = false;
+  int shift = last - info.srWindow.Bottom;
+  const int room = info.dwSize.Y - 1 - info.srWindow.Bottom;
+  if (shift > room)
+    shift = room;
+  if (shift <= 0)
+    return;
+  SMALL_RECT win = info.srWindow;
+  win.Top = static_cast<SHORT>(win.Top + shift);
+  win.Bottom = static_cast<SHORT>(win.Bottom + shift);
+  if (!SetConsoleWindowInfo(h, TRUE, &win)) {
+    erase_ours();
+    place(Pos{info.srWindow.Bottom, 0});
+    int push = last - info.srWindow.Bottom + 1;
+    if (push < 1)
+      push = 1;
+    for (int i = 0; i < push; ++i)
+      write_bytes("\r\n");
+    CONSOLE_SCREEN_BUFFER_INFO after{};
+    if (GetConsoleScreenBufferInfo(h, &after))
+      anchor_.row = after.srWindow.Bottom - need + 1;
+    if (anchor_.row < 0)
+      anchor_.row = 0;
+    anchor_.column = 0;
+    painted_ = false;
+  }
 }
 
 void Bar::paint() {
@@ -323,18 +335,16 @@ void Bar::paint() {
       static_cast<std::size_t>(info.srWindow.Right - info.srWindow.Left + 1),
       info.dwSize.X);
 
-  if (!bar_visible()) {
-
-    painted_ = false;
-    return;
-  }
-
+  bool reflowed = false;
   if (layout_lost_) {
     layout_lost_ = false;
-    append_fresh();
-    if (!GetConsoleScreenBufferInfo(h, &info))
-      return;
-    buffer_width_ = info.dwSize.X;
+    recover_anchor();
+    reflowed = true;
+  }
+
+  if (!bar_visible()) {
+    painted_ = false;
+    return;
   }
 
   if (!pending_.empty())
@@ -364,24 +374,35 @@ void Bar::paint() {
 
   if (echo_changed) {
     for (std::size_t i = 0; i < laid.rows.size(); ++i) {
-      place(
-          Pos{anchor_.row + static_cast<int>(i), i == 0 ? anchor_.column : 0});
+      if (!place(Pos{anchor_.row + static_cast<int>(i),
+                     i == 0 ? anchor_.column : 0}))
+        break;
       write_bytes(laid.rows[i]);
       write_bytes("\x1b[K");
     }
   }
 
   if (status_changed) {
-    place(Pos{status_row, 0});
-    write_bytes("\x1b[7m");
-    write_bytes(status_text_);
-    write_bytes("\x1b[K\x1b[0m");
+    if (place(Pos{status_row, 0})) {
+      write_bytes("\x1b[7m");
+      write_bytes(status_text_);
+      write_bytes("\x1b[K\x1b[0m");
+    }
   }
 
   const std::size_t area_rows = laid.rows.size() + 1;
   if (painted_ && painted_area_rows_ > area_rows) {
     for (std::size_t r = area_rows; r < painted_area_rows_; ++r) {
-      place(Pos{anchor_.row + static_cast<int>(r), 0});
+      if (!place(Pos{anchor_.row + static_cast<int>(r), 0}))
+        break;
+      write_bytes("\x1b[K");
+    }
+  }
+
+  if (reflowed) {
+    for (std::size_t r = area_rows; r < area_rows + 3; ++r) {
+      if (!place(Pos{anchor_.row + static_cast<int>(r), 0}))
+        break;
       write_bytes("\x1b[K");
     }
   }
