@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstring>
 #include <string>
 
 namespace coding {
@@ -46,6 +47,45 @@ std::string text() {
     return out;
   }
   return {};
+}
+
+bool set_text(std::string_view utf8) {
+  const int units = MultiByteToWideChar(
+      CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+  if (units <= 0 && !utf8.empty())
+    return false;
+
+  std::wstring wide(static_cast<std::size_t>(units), L'\0');
+  if (units > 0)
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
+                        wide.data(), units);
+
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    if (!OpenClipboard(nullptr)) {
+      Sleep(10);
+      continue;
+    }
+
+    bool ok = false;
+    if (EmptyClipboard()) {
+      const std::size_t bytes = (wide.size() + 1) * sizeof(wchar_t);
+      if (HANDLE data = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+        if (void *target = GlobalLock(data)) {
+          std::memcpy(target, wide.c_str(), bytes);
+          GlobalUnlock(data);
+          if (SetClipboardData(CF_UNICODETEXT, data) != nullptr)
+            ok = true;
+          else
+            GlobalFree(data);
+        } else {
+          GlobalFree(data);
+        }
+      }
+    }
+    CloseClipboard();
+    return ok;
+  }
+  return false;
 }
 
 } // namespace clipboard

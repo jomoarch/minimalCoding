@@ -116,6 +116,9 @@ cg_t --stop
 | `[io].merge_stderr`        | 是否把 stderr 也写进输出文件；不写就各自维持现状（见上文「stderr 要不要进输出文件」）                                            |
 | `[io].print_input`         | 回显时是否先把输入打出来；默认 `false`                                                                                           |
 | `[io].echo_limit_kb`       | 输出超过这么多 KB 就不打印，跑完再问要不要看；`0` 表示不限（默认 `256`）                                                         |
+| `[io].ask_save_input`      | 跑完是否询问保存输入；关掉不问（默认`true`）                                                                                     |
+| `[io].ask_save_output`     | 跑完是否询问保存输出；关掉不问（默认`true`）                                                                                     |
+| `[io].ask_copy_output`     | 跑完是否询问把输出复制到粘贴板（默认 `false`）；复制的内容与写文件那份一致，stderr 是否包含同样看 `merge_stderr`                 |
 | `[daemon].interactive`     | `cg_t` 触发交互模式的热键，默认 `Ctrl+Alt+I`；留空关掉                                                                           |
 | `[daemon].single`          | `cg_t` 触发单文件模式的热键，默认 `Ctrl+Alt+S`；留空关掉                                                                         |
 | `[daemon].quit`            | `cg_t` 退出热键，默认 `Ctrl+Alt+Q`；留空关掉                                                                                     |

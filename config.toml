@@ -22,6 +22,9 @@ merge_stderr = false
 print_input = false
 colorize_output = true
 echo_limit_kb = 256
+ask_save_input = true
+ask_save_output = true
+ask_copy_output = false
 
 [daemon]
 interactive = "Ctrl+Alt+I"

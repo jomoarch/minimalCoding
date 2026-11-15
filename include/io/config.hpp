@@ -40,6 +40,9 @@ struct AppConfig {
   bool print_input{false};
   bool colorize_output{true};
   std::size_t echo_limit_bytes{256u * 1024u};
+  bool ask_save_input{true};
+  bool ask_save_output{true};
+  bool ask_copy_output{false};
 
   // build
   bool force_rebuild{false};

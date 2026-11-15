@@ -1,6 +1,7 @@
 #include "app/modes.hpp"
 
 #include "app/builder.hpp"
+#include "app/clipboard.hpp"
 #include "app/interactive_ui.hpp"
 #include "app/program_hook.hpp"
 #include "app/prompt.hpp"
@@ -297,7 +298,8 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
   }
 
   std::string single_output = show_relative(cfg.base, cfg.single_output);
-  if (single_output.empty()) {
+  if (!cfg.ask_save_output) {
+  } else if (single_output.empty()) {
     std::cout << "[save] [io].single_output is not configured, nothing saved\n";
   } else if (prompt::ask_save(single_output, "output")) {
     if (write_text(cfg.single_output, run.captured)) {
@@ -312,24 +314,40 @@ ModeOutcome finish_single(const AppConfig &cfg, const SingleRunResult &run,
     }
   }
 
+  if (cfg.ask_copy_output) {
+    if (run.captured.empty()) {
+      std::cout << "[copy] the output is empty, nothing copied\n";
+    } else if (prompt::ask_yes_no("Copy the output to the clipboard?")) {
+      if (clipboard::set_text(run.captured))
+        std::cout << color::ok("[copy] copied ", run.captured.size(),
+                               " byte(s) to the clipboard")
+                  << "\n";
+      else
+        std::cerr << color::err("[copy] cannot open the clipboard") << "\n";
+    }
+  }
+
   if (!is_interactive) {
     out.code = run.result.status == RunnerStatus::Success ? 0 : 1;
     return out;
   }
 
-  std::string single_input = show_relative(cfg.base, cfg.single_input);
-  if (run.user_input.empty()) {
-    std::cout << "[save] your input is empty, nothing saved\n";
-  } else if (prompt::ask_save(single_input, "input")) {
-    if (write_text(cfg.single_input, run.user_input)) {
-      std::cout << color::ok("[save] saved ", run.user_input.size(),
-                             " byte(s) -> ", single_input)
-                << "\n";
-      out.saved_input = true;
-    } else {
-      std::cerr << color::err("[save] Failed to write ", single_input) << "\n";
-      out.code = 2;
-      return out;
+  if (cfg.ask_save_input) {
+    std::string single_input = show_relative(cfg.base, cfg.single_input);
+    if (run.user_input.empty()) {
+      std::cout << "[save] your input is empty, nothing saved\n";
+    } else if (prompt::ask_save(single_input, "input")) {
+      if (write_text(cfg.single_input, run.user_input)) {
+        std::cout << color::ok("[save] saved ", run.user_input.size(),
+                               " byte(s) -> ", single_input)
+                  << "\n";
+        out.saved_input = true;
+      } else {
+        std::cerr << color::err("[save] Failed to write ", single_input)
+                  << "\n";
+        out.code = 2;
+        return out;
+      }
     }
   }
 
