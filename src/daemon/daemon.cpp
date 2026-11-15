@@ -330,7 +330,13 @@ int run_service() {
   if (!keys.run(on_hotkey, waits, on_wake, error))
     std::cerr << color::err("[cg_t] ", error) << "\n";
 
-  launcher.reap_all();
+  for (int i = 0; i < kJobCount; ++i) {
+    const Job job = static_cast<Job>(i);
+    if (launcher.busy(job))
+      log.write(std::string(describe(job)) + ": killed (daemon exiting)");
+  }
+  launcher.shutdown();
+
   remove_status(cfg);
   log.write("daemon: stopped");
   std::cout << color::info("[cg_t] stopped") << "\n";

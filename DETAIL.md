@@ -207,6 +207,25 @@ bin/config.link  ->  ../shared/team.link  ->  C:/path/config.toml
 
 ## 关于守护进程
 
+### 退出时连正在运行的任务一起杀掉
+
+`cg_t` 把每次触发的任务（`cg_t --job i`）都放进同一个 **Job Object**，并且设了
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`。所以无论守护进程是**正常退出**（`Ctrl+Alt+Q`
+或 `cg_t --stop`）还是**被强杀**（任务管理器、`taskkill /F`），只要进程没了、
+job 句柄随之关闭，系统就会把里面所有进程立刻终止。
+
+任务进程在被创建时是挂起的（`CREATE_SUSPENDED`），**先入 job 再放行**，这样它
+抢先生出来的编译器/被测程序不会漏在 job 外面。任务进程自己再给 g++ 和被测程序
+建一层 job，所以整条链都断得干净：
+
+```
+cg_t  ──job──>  cg_t --job i  ──job──>  g++.exe / 你编译出来的程序
+```
+
+被这样终止的任务**不会执行到保存那一步**：输入、输出文件、剪贴板一律不写，也不会
+再弹任何询问。唯一的残留是显示用的大输出缓存 `<base>/.coding/last_output.txt`
+（下次运行会覆盖它）。
+
 ### 已知限制：一个会话只能有一个守护进程
 
 ### 热键冲突

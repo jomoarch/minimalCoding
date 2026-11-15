@@ -27,12 +27,26 @@ std::wstring module_path() {
 
 } // namespace
 
-JobLauncher::~JobLauncher() { reap_all(); }
+JobLauncher::~JobLauncher() { shutdown(); }
 
 bool JobLauncher::open(std::string &error) {
   exe_ = module_path();
   if (exe_.empty()) {
     error = "cannot determine my own path";
+    return false;
+  }
+
+  job_.reset(::CreateJobObjectW(nullptr, nullptr));
+  if (!job_.valid()) {
+    error = "CreateJobObjectW failed: " + win::last_error_string();
+    return false;
+  }
+
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!::SetInformationJobObject(job_.get(), JobObjectExtendedLimitInformation,
+                                 &limits, sizeof(limits))) {
+    error = "SetInformationJobObject failed: " + win::last_error_string();
     return false;
   }
   return true;
@@ -72,13 +86,23 @@ LaunchResult JobLauncher::launch(Job job, unsigned long long *pid,
   startup.cb = sizeof(startup);
   PROCESS_INFORMATION info{};
 
-  const DWORD flags = CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT;
+  const DWORD flags =
+      CREATE_SUSPENDED | CREATE_NEW_CONSOLE | CREATE_UNICODE_ENVIRONMENT;
   if (!::CreateProcessW(exe_.c_str(), buffer.data(), nullptr, nullptr, FALSE,
                         flags, nullptr, nullptr, &startup, &info)) {
     error = win::last_error_string();
     return LaunchResult::Failed;
   }
 
+  if (!::AssignProcessToJobObject(job_.get(), info.hProcess)) {
+    error = "AssignProcessToJobObject failed: " + win::last_error_string();
+    ::TerminateProcess(info.hProcess, 1);
+    ::CloseHandle(info.hThread);
+    ::CloseHandle(info.hProcess);
+    return LaunchResult::Failed;
+  }
+
+  ::ResumeThread(info.hThread);
   ::CloseHandle(info.hThread);
   jobs_[static_cast<int>(job)] = info.hProcess;
   pids_[static_cast<int>(job)] = info.dwProcessId;
@@ -99,6 +123,12 @@ void JobLauncher::reap(Job job) noexcept {
 void JobLauncher::reap_all() noexcept {
   for (int i = 0; i < kJobCount; ++i)
     reap(static_cast<Job>(i));
+}
+
+void JobLauncher::shutdown() noexcept {
+
+  job_.reset();
+  reap_all();
 }
 
 } // namespace app

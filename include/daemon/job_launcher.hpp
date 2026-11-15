@@ -1,6 +1,8 @@
 #ifndef JOB_LAUNCHER_HPP
 #define JOB_LAUNCHER_HPP
 
+#include "base/handle.hpp"
+
 #include <windows.h>
 
 #include <cstddef>
@@ -41,8 +43,11 @@ public:
 
   void reap_all() noexcept;
 
+  void shutdown() noexcept;
+
 private:
   std::wstring exe_;
+  HandleGuard job_;
   HANDLE jobs_[kJobCount]{nullptr, nullptr};
   unsigned long long pids_[kJobCount]{0, 0};
 };
