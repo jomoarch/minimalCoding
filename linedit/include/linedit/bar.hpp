@@ -67,6 +67,8 @@ private:
   void ensure_output_room(int bar_rows);
   void erase_bar();
   void draw_bar(const Layout &laid);
+  void draw_marker(const Layout &laid);
+  void erase_marker();
   void place_caret(const Layout &laid);
 
   void hide_cursor();
@@ -102,6 +104,8 @@ private:
   bool painted_compact_{false};
   int painted_bar_top_{-1};
   int painted_bar_rows_{0};
+  int marker_row_{-1};
+  int marker_col_{-1};
   bool cursor_hidden_{false};
 };
 
