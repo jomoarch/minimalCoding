@@ -4,13 +4,13 @@
 
 ## 内容
 
-| 头文件                                               | 作用                                                  |
-| ---------------------------------------------------- | ----------------------------------------------------- |
-| [`key.hpp`](include/linedit/key.hpp)                 | 语义按键 `Key`、`Size`、`Screen`                      |
-| [`session.hpp`](include/linedit/session.hpp)         | 控制台会话：切原始模式、读按键、拿尺寸、写字节        |
-| [`editor.hpp`](include/linedit/editor.hpp)           | 行缓冲区：光标、UTF-8 编辑、词级移动/删除、按行排版   |
-| [`bar.hpp`](include/linedit/bar.hpp)                 | 屏幕编排：程序输出往上滚，输入行 + 状态行钉在下面两行 |
-| [`status_line.hpp`](include/linedit/status_line.hpp) | 状态行里的旋转木棍                                    |
+| 头文件                                               | 作用                                                             |
+| ---------------------------------------------------- | ---------------------------------------------------------------- |
+| [`key.hpp`](include/linedit/key.hpp)                 | 语义按键 `Key`、`Size`、`Screen`                                 |
+| [`session.hpp`](include/linedit/session.hpp)         | 控制台会话：切原始模式、读按键、拿尺寸、写字节                   |
+| [`editor.hpp`](include/linedit/editor.hpp)           | 行缓冲区：光标、UTF-8 编辑、词级移动/删除、按行排版              |
+| [`bar.hpp`](include/linedit/bar.hpp)                 | 屏幕编排：输出写在窗口上方，分隔线 + 输入行 + 状态行固定在最底部 |
+| [`status_line.hpp`](include/linedit/status_line.hpp) | 状态行里的旋转木棍                                               |
 
 依赖方向是单向的：`Editor` 不认识 `Bar`，`Bar` 不认识 `Editor`（它只接受
 「要显示的文本」），`session` 不认识上面任何一层。只有 `session.cpp` 和

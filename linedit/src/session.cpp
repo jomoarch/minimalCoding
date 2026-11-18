@@ -229,6 +229,12 @@ bool Session::read_key(Key &out, bool raw, char32_t *text,
     case VK_ESCAPE:
       out = Key::Quit;
       return true;
+    case VK_F8:
+      out = Key::Hold;
+      return true;
+    case VK_F9:
+      out = Key::Destroy;
+      return true;
     case 'C':
       out = Key::Quit;
       return true;
