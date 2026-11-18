@@ -33,8 +33,6 @@ public:
 
   void commit_text(std::string_view text);
 
-  void set_compact(bool compact);
-
   void resize();
 
   void paint();
@@ -48,34 +46,18 @@ private:
     int column{0};
   };
 
-  struct Layout {
-    bool valid{false};
-    std::size_t input_rows{0};
-    std::size_t view_start{0};
-    std::size_t caret_row{0};
-    std::size_t caret_column{0};
-    int bar_top{0};
-    int status_row{0};
-    int bar_rows{0};
-  };
-
   bool place(const Pos &at) const;
   void write_bytes(std::string_view bytes) const;
   bool cursor_now(Pos &out) const;
-
-  Layout layout() const;
-  void ensure_output_room(int bar_rows);
-  void erase_bar();
-  void draw_bar(const Layout &laid);
-  void place_caret(const Layout &laid);
-
+  void erase_ours();
   void hide_cursor();
   void show_cursor();
+  void ensure_room(std::size_t echo_rows);
   void recover_anchor();
   bool bar_visible() const;
+  void flush_pending();
   bool skip_for_selection() const;
   bool settling() const noexcept;
-  void flush_pending();
 
   void *input_{nullptr};
   void *output_{nullptr};
@@ -93,15 +75,13 @@ private:
   std::string input_text_;
   std::size_t input_cursor_bytes_{0};
   std::string status_text_;
-  bool compact_{false};
 
-  bool painted_{false};
   std::string painted_input_;
   std::size_t painted_cursor_{0};
   std::string painted_status_;
-  bool painted_compact_{false};
-  int painted_bar_top_{-1};
-  int painted_bar_rows_{0};
+  bool painted_{false};
+  int painted_status_row_{-1};
+  std::size_t painted_area_rows_{0};
   bool cursor_hidden_{false};
 };
 

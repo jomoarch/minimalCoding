@@ -19,8 +19,6 @@ enum class Key {
   Quit,
   EndOfInput,
   Resize,
-  Hold,
-  Destroy,
   Text
 };
 

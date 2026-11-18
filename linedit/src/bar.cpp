@@ -1,6 +1,5 @@
 #include "linedit/bar.hpp"
 
-#include "base/text.hpp"
 #include "linedit/editor.hpp"
 
 #include <windows.h>
@@ -16,8 +15,6 @@ namespace {
 constexpr std::size_t kMinRows = 4;
 constexpr std::size_t kMinColumns = 12;
 constexpr std::size_t kMaxPending = 64u << 20;
-constexpr std::size_t kMaxInputRows = 12;
-constexpr std::size_t kPromptColumns = 2; // "> "
 constexpr auto kSettleDelay = std::chrono::milliseconds(200);
 
 void raw_write(HANDLE h, std::string_view bytes) {
@@ -30,24 +27,6 @@ void raw_write(HANDLE h, std::string_view bytes) {
       return;
     done += wrote;
   }
-}
-
-std::string clip_width(std::string_view text, std::size_t width) {
-  if (width == 0)
-    return {};
-  if (coding::text::display_width(text) <= width)
-    return std::string(text);
-
-  std::string cut;
-  std::size_t i = 0;
-  while (i < text.size()) {
-    const coding::text::CharWidth w = coding::text::measure(text, i);
-    if (w.bytes == 0 || coding::text::display_width(cut) + w.columns > width)
-      break;
-    cut.append(text, i, w.bytes);
-    i += w.bytes;
-  }
-  return cut;
 }
 
 } // namespace
@@ -93,7 +72,7 @@ void Bar::close() noexcept {
     return;
   if (!pending_.empty())
     flush_pending();
-  erase_bar();
+  erase_ours();
   active_ = false;
   place(anchor_);
   show_cursor();
@@ -133,198 +112,29 @@ bool Bar::skip_for_selection() const {
 
 bool Bar::settling() const noexcept { return settling_; }
 
-Bar::Layout Bar::layout() const {
-  Layout result;
+void Bar::erase_ours() {
+  if (!active_)
+    return;
 
   CONSOLE_SCREEN_BUFFER_INFO info{};
   if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
-    return result;
-
-  const int window_rows = info.srWindow.Bottom - info.srWindow.Top + 1;
-  const int window_columns = info.srWindow.Right - info.srWindow.Left + 1;
-  if (window_rows < static_cast<int>(kMinRows) ||
-      window_columns < static_cast<int>(kMinColumns))
-    return result;
-
-  const std::size_t columns = static_cast<std::size_t>(window_columns);
-  std::size_t input_rows = 0;
-  std::size_t view_start = 0;
-  std::size_t caret_row = 0;
-  std::size_t caret_column = 0;
-
-  if (!compact_) {
-    const std::size_t first_room =
-        columns > kPromptColumns ? columns - kPromptColumns : 1;
-    const linedit::Layout text = linedit::layout_text(
-        input_text_, input_cursor_bytes_, first_room, columns);
-
-    std::size_t max_input =
-        window_rows > 4 ? static_cast<std::size_t>(window_rows - 3) : 1;
-    if (max_input > kMaxInputRows)
-      max_input = kMaxInputRows;
-    if (max_input < 1)
-      max_input = 1;
-
-    const std::size_t total = text.rows.size();
-    const std::size_t view = std::min(total, max_input);
-    std::size_t start = 0;
-    if (text.caret_row >= view)
-      start = text.caret_row + 1 - view;
-    if (start + view > total)
-      start = total > view ? total - view : 0;
-
-    input_rows = view;
-    view_start = start;
-    caret_row = text.caret_row >= start ? text.caret_row - start : 0;
-    if (caret_row >= view)
-      caret_row = view - 1;
-    caret_column = text.caret_column;
-  }
-
-  result.input_rows = input_rows;
-  result.view_start = view_start;
-  result.caret_row = caret_row;
-  result.caret_column = caret_column;
-  result.bar_rows = compact_ ? 1 : static_cast<int>(1 + input_rows + 1);
-  result.bar_top = info.srWindow.Bottom - result.bar_rows + 1;
-  result.status_row = info.srWindow.Bottom;
-  if (result.bar_top <= info.srWindow.Top)
-    return result;
-
-  result.valid = true;
-  return result;
-}
-
-void Bar::ensure_output_room(int bar_rows) {
-  if (bar_rows <= 0)
     return;
 
-  HANDLE h = static_cast<HANDLE>(output_);
-  CONSOLE_SCREEN_BUFFER_INFO info{};
-  if (!GetConsoleScreenBufferInfo(h, &info))
-    return;
-
-  const int bar_top = info.srWindow.Bottom - bar_rows + 1;
-  const int desired = anchor_.row + (anchor_.column > 0 ? 1 : 0);
-  if (desired <= bar_top)
-    return;
-
-  int delta = desired - bar_top;
-
-  if (info.srWindow.Bottom + delta >= info.dwSize.Y) {
-    const int want = std::min<int>(info.dwSize.Y + delta + 64, 32000);
-    if (want > info.dwSize.Y) {
-      COORD size = info.dwSize;
-      size.Y = static_cast<SHORT>(want);
-      if (!SetConsoleScreenBufferSize(h, size))
-        return;
-      if (!GetConsoleScreenBufferInfo(h, &info))
-        return;
-    }
-  }
-
-  int room = info.dwSize.Y - 1 - info.srWindow.Bottom;
-  if (delta > room)
-    delta = room;
-  if (delta <= 0)
-    return;
-
-  SMALL_RECT window = info.srWindow;
-  window.Top = static_cast<SHORT>(window.Top + delta);
-  window.Bottom = static_cast<SHORT>(window.Bottom + delta);
-  SetConsoleWindowInfo(h, TRUE, &window);
-}
-
-void Bar::erase_bar() {
-  if (painted_bar_top_ < 0 || painted_bar_rows_ <= 0)
-    return;
-
-  HANDLE h = static_cast<HANDLE>(output_);
-  CONSOLE_SCREEN_BUFFER_INFO info{};
-  if (!GetConsoleScreenBufferInfo(h, &info))
-    return;
-
+  const SHORT width = info.dwSize.X;
   DWORD written = 0;
-  const int first = painted_bar_top_;
-  const int last = painted_bar_top_ + painted_bar_rows_ - 1;
-  for (int row = first; row <= last; ++row) {
+  for (int i = 0; i < 2; ++i) {
+    const int row = anchor_.row + i;
     if (row < 0 || row >= info.dwSize.Y)
       continue;
-    const COORD at{0, static_cast<SHORT>(row)};
-    FillConsoleOutputCharacterW(h, L' ', info.dwSize.X, at, &written);
-    FillConsoleOutputAttribute(h, info.wAttributes, info.dwSize.X, at,
-                               &written);
+    const int from = i == 0 ? anchor_.column : 0;
+    if (from >= width)
+      continue;
+    const COORD at{static_cast<SHORT>(from), static_cast<SHORT>(row)};
+    FillConsoleOutputCharacterW(static_cast<HANDLE>(output_), L' ',
+                                static_cast<DWORD>(width - from), at, &written);
+    FillConsoleOutputAttribute(static_cast<HANDLE>(output_), info.wAttributes,
+                               static_cast<DWORD>(width - from), at, &written);
   }
-
-  painted_bar_top_ = -1;
-  painted_bar_rows_ = 0;
-}
-
-void Bar::draw_bar(const Layout &laid) {
-  if (laid.bar_rows <= 0)
-    return;
-
-  HANDLE h = static_cast<HANDLE>(output_);
-  CONSOLE_SCREEN_BUFFER_INFO info{};
-  if (!GetConsoleScreenBufferInfo(h, &info))
-    return;
-
-  const std::size_t columns =
-      static_cast<std::size_t>(info.srWindow.Right - info.srWindow.Left + 1);
-
-  if (!compact_) {
-    place(Pos{laid.bar_top, 0});
-    write_bytes("\x1b[2m");
-    std::string line;
-    line.reserve(columns * 3);
-    for (std::size_t i = 0; i < columns; ++i)
-      line += "\xe2\x94\x80";
-    write_bytes(line);
-    write_bytes("\x1b[0m");
-
-    const std::size_t first_room =
-        columns > kPromptColumns ? columns - kPromptColumns : 1;
-    const linedit::Layout text = linedit::layout_text(
-        input_text_, input_cursor_bytes_, first_room, columns);
-
-    for (std::size_t i = 0; i < laid.input_rows; ++i) {
-      place(Pos{laid.bar_top + 1 + static_cast<int>(i), 0});
-      const std::size_t logical = laid.view_start + i;
-      if (logical == 0)
-        write_bytes("\x1b[2m> \x1b[0m");
-      if (logical < text.rows.size())
-        write_bytes(text.rows[logical]);
-      write_bytes("\x1b[K");
-    }
-  }
-
-  place(Pos{laid.status_row, 0});
-  write_bytes("\x1b[7m");
-  write_bytes(clip_width(status_text_, columns > 1 ? columns - 1 : 0));
-  write_bytes("\x1b[K\x1b[0m");
-}
-
-void Bar::place_caret(const Layout &laid) {
-  if (compact_ || laid.input_rows == 0) {
-    hide_cursor();
-    return;
-  }
-  if (laid.caret_row >= laid.input_rows) {
-    hide_cursor();
-    return;
-  }
-
-  int column = static_cast<int>(laid.caret_column);
-  if (laid.view_start == 0 && laid.caret_row == 0)
-    column += static_cast<int>(kPromptColumns);
-  if (column >= static_cast<int>(columns_))
-    column = static_cast<int>(columns_) - 1;
-  if (column < 0)
-    column = 0;
-
-  if (!place(Pos{laid.bar_top + 1 + static_cast<int>(laid.caret_row), column}))
-    return;
-  show_cursor();
 }
 
 void Bar::hide_cursor() {
@@ -342,81 +152,52 @@ void Bar::show_cursor() {
 }
 
 void Bar::recover_anchor() {
+  Pos at{};
+  if (!cursor_now(at))
+    return;
+  const Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+  const int row = at.row - static_cast<int>(laid.caret_row);
+  const int column = at.column - static_cast<int>(laid.caret_column);
+  anchor_.row = std::max(0, row);
+  anchor_.column = std::max(0, column);
+  painted_ = false;
+}
+
+bool Bar::bar_visible() const {
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+  if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
+    return true;
+  return anchor_.row >= info.srWindow.Top &&
+         anchor_.row <= info.srWindow.Bottom;
+}
+
+bool Bar::input_visible() const {
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+  if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
+    return true;
+  const Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+  const int last = anchor_.row + static_cast<int>(laid.rows.size()) - 1;
+  return anchor_.row >= info.srWindow.Top && last <= info.srWindow.Bottom;
+}
+
+void Bar::reveal_input() {
+  if (!active_)
+    return;
+
   HANDLE h = static_cast<HANDLE>(output_);
   CONSOLE_SCREEN_BUFFER_INFO info{};
   if (!GetConsoleScreenBufferInfo(h, &info))
     return;
 
-  int row = painted_bar_top_ > info.srWindow.Top ? painted_bar_top_ - 1
-                                                 : info.srWindow.Top;
-  if (row < 0)
-    row = 0;
-  if (row >= info.dwSize.Y)
-    row = info.dwSize.Y - 1;
-
-  const int width = info.dwSize.X;
-  if (width <= 0) {
-    anchor_ = Pos{row, 0};
-    painted_ = false;
+  const Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+  const int area = static_cast<int>(laid.rows.size());
+  if (area <= 0)
     return;
-  }
 
-  std::wstring cells(static_cast<std::size_t>(width), L' ');
-  DWORD read = 0;
-  const COORD at{0, static_cast<SHORT>(row)};
-  if (!ReadConsoleOutputCharacterW(h, cells.data(), static_cast<DWORD>(width),
-                                   at, &read) ||
-      read == 0) {
-    anchor_ = Pos{row, 0};
-    painted_ = false;
-    return;
-  }
-
-  int last = -1;
-  for (int i = 0; i < static_cast<int>(read); ++i) {
-    if (cells[i] != L' ' && cells[i] != L'\0')
-      last = i;
-  }
-
-  if (last < 0)
-    anchor_ = Pos{row, 0};
-  else if (last >= width - 1)
-    anchor_ = Pos{row + 1, 0};
-  else
-    anchor_ = Pos{row, last + 1};
-
-  painted_ = false;
-}
-
-bool Bar::bar_visible() const {
-  if (painted_bar_top_ < 0 || painted_bar_rows_ <= 0)
-    return true;
-
-  CONSOLE_SCREEN_BUFFER_INFO info{};
-  if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
-    return true;
-
-  const int top = painted_bar_top_;
-  const int bottom = painted_bar_top_ + painted_bar_rows_ - 1;
-  return top >= info.srWindow.Top && bottom <= info.srWindow.Bottom;
-}
-
-bool Bar::input_visible() const {
-  if (compact_)
-    return true;
-  return bar_visible();
-}
-
-void Bar::reveal_input() {
-  if (!active_ || compact_)
-    return;
-  if (painted_bar_top_ < 0 || painted_bar_rows_ <= 0) {
-    paint();
-    return;
-  }
-
-  HANDLE h = static_cast<HANDLE>(output_);
-  CONSOLE_SCREEN_BUFFER_INFO info{};
+  ensure_room(static_cast<std::size_t>(area));
   if (!GetConsoleScreenBufferInfo(h, &info))
     return;
 
@@ -424,20 +205,23 @@ void Bar::reveal_input() {
   if (height <= 0)
     return;
 
-  int top = painted_bar_top_ + painted_bar_rows_ - height;
-  if (top + height > info.dwSize.Y)
+  const int status_row = anchor_.row + area;
+  int top = status_row - (height - 1);
+
+  if (top < 0)
+    top = 0;
+  if (top > info.dwSize.Y - height)
     top = info.dwSize.Y - height;
   if (top < 0)
     top = 0;
-  if (top == info.srWindow.Top) {
-    painted_ = false;
-    return;
-  }
 
-  SMALL_RECT window = info.srWindow;
-  window.Top = static_cast<SHORT>(top);
-  window.Bottom = static_cast<SHORT>(top + height - 1);
-  if (SetConsoleWindowInfo(h, TRUE, &window))
+  if (top == info.srWindow.Top)
+    return;
+
+  SMALL_RECT win = info.srWindow;
+  win.Top = static_cast<SHORT>(top);
+  win.Bottom = static_cast<SHORT>(top + height - 1);
+  if (SetConsoleWindowInfo(h, TRUE, &win))
     painted_ = false;
 }
 
@@ -446,44 +230,43 @@ void Bar::flush_pending() {
     return;
 
   hide_cursor();
-  erase_bar();
+  erase_ours();
   place(anchor_);
   write_bytes(pending_);
   pending_.clear();
   painted_ = false;
 
   Pos after{};
-  if (cursor_now(after))
-    anchor_ = after;
+  if (cursor_now(after)) {
+    anchor_.row = std::max(0, after.row);
+    anchor_.column = std::max(0, after.column);
+  }
 }
 
 void Bar::write_output(std::string_view data) {
   if (!active_ || data.empty())
     return;
 
-  if (skip_for_selection() || settling() || !pending_.empty()) {
+  if (skip_for_selection() || settling() || !bar_visible()) {
     if (pending_.size() + data.size() <= kMaxPending)
       pending_.append(data);
     painted_ = false;
     return;
   }
 
-  if (painted_ && painted_bar_top_ >= 0 && !bar_visible()) {
-    if (pending_.size() + data.size() <= kMaxPending)
-      pending_.append(data);
-    return;
-  }
-
   hide_cursor();
-  erase_bar();
+
+  erase_ours();
   place(anchor_);
   write_bytes(data);
+
   painted_ = false;
 
   Pos after{};
-  if (cursor_now(after))
-    anchor_ = after;
-
+  if (cursor_now(after)) {
+    anchor_.row = std::max(0, after.row);
+    anchor_.column = std::max(0, after.column);
+  }
   paint();
 }
 
@@ -494,20 +277,11 @@ void Bar::set_input(std::string_view text, std::size_t cursor_bytes) {
 
 void Bar::set_status(std::string_view text) { status_text_.assign(text); }
 
-void Bar::set_compact(bool compact) {
-  if (compact_ == compact)
-    return;
-  compact_ = compact;
-  painted_ = false;
-  if (active_ && !settling())
-    paint();
-}
-
 void Bar::commit_text(std::string_view text) {
   if (!active_ || text.empty())
     return;
 
-  if (skip_for_selection() || settling() || !pending_.empty()) {
+  if (skip_for_selection() || settling() || !bar_visible()) {
     if (pending_.size() + text.size() + 1 <= kMaxPending) {
       pending_.append(text);
       if (text.back() != '\n')
@@ -519,29 +293,19 @@ void Bar::commit_text(std::string_view text) {
     return;
   }
 
-  if (painted_ && painted_bar_top_ >= 0 && !bar_visible()) {
-    if (pending_.size() + text.size() + 1 <= kMaxPending) {
-      pending_.append(text);
-      if (text.back() != '\n')
-        pending_.push_back('\n');
-    }
-    input_text_.clear();
-    input_cursor_bytes_ = 0;
-    return;
-  }
-
   hide_cursor();
-  erase_bar();
   place(anchor_);
   write_bytes(text);
   if (text.back() != '\n')
     write_bytes("\r\n");
 
   Pos after{};
-  if (cursor_now(after))
-    anchor_ = after;
-  else
-    anchor_ = Pos{anchor_.row + 1, 0};
+  if (cursor_now(after)) {
+    anchor_.row = std::max(0, after.row);
+    anchor_.column = std::max(0, after.column);
+  } else {
+    anchor_.column = 0;
+  }
 
   input_text_.clear();
   input_cursor_bytes_ = 0;
@@ -551,13 +315,9 @@ void Bar::commit_text(std::string_view text) {
 
 void Bar::resize() { painted_ = false; }
 
-void Bar::paint() {
-  if (!active_)
-    return;
-  if (skip_for_selection())
-    return;
-
-  if (painted_ && painted_bar_top_ >= 0 && !bar_visible())
+void Bar::ensure_room(std::size_t echo_rows) {
+  const int need = static_cast<int>(echo_rows) + 1;
+  if (need <= 0)
     return;
 
   HANDLE h = static_cast<HANDLE>(output_);
@@ -565,18 +325,70 @@ void Bar::paint() {
   if (!GetConsoleScreenBufferInfo(h, &info))
     return;
 
-  const std::size_t window_rows =
+  const int last = anchor_.row + need - 1;
+  if (last <= info.srWindow.Bottom)
+    return;
+
+  if (last >= info.dwSize.Y) {
+    COORD size = info.dwSize;
+    size.Y = static_cast<SHORT>(std::min<int>(last + 1, 32000));
+    if (!SetConsoleScreenBufferSize(h, size) ||
+        !GetConsoleScreenBufferInfo(h, &info) || last >= info.dwSize.Y)
+      return;
+  }
+
+  int shift = last - info.srWindow.Bottom;
+  const int room = info.dwSize.Y - 1 - info.srWindow.Bottom;
+  if (shift > room)
+    shift = room;
+  if (shift <= 0)
+    return;
+
+  SMALL_RECT win = info.srWindow;
+  win.Top = static_cast<SHORT>(win.Top + shift);
+  win.Bottom = static_cast<SHORT>(win.Bottom + shift);
+  if (!SetConsoleWindowInfo(h, TRUE, &win)) {
+    erase_ours();
+    place(Pos{info.srWindow.Bottom, 0});
+    int push = last - info.srWindow.Bottom + 1;
+    if (push < 1)
+      push = 1;
+    for (int i = 0; i < push; ++i)
+      write_bytes("\r\n");
+
+    CONSOLE_SCREEN_BUFFER_INFO after{};
+    if (GetConsoleScreenBufferInfo(h, &after))
+      anchor_.row = after.srWindow.Bottom - need + 1;
+    if (anchor_.row < 0)
+      anchor_.row = 0;
+    anchor_.column = 0;
+    painted_ = false;
+  }
+}
+
+void Bar::paint() {
+  if (!active_)
+    return;
+  if (skip_for_selection())
+    return;
+
+  HANDLE h = static_cast<HANDLE>(output_);
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+  if (!GetConsoleScreenBufferInfo(h, &info))
+    return;
+
+  const std::size_t win_rows =
       static_cast<std::size_t>(info.srWindow.Bottom - info.srWindow.Top + 1);
-  const std::size_t window_columns =
+  const std::size_t win_cols =
       static_cast<std::size_t>(info.srWindow.Right - info.srWindow.Left + 1);
 
-  if (window_rows != rows_ || window_columns != columns_ ||
+  if (win_rows != rows_ || win_cols != columns_ ||
       info.dwSize.X != buffer_width_) {
     if (buffer_width_ != 0 && info.dwSize.X != buffer_width_)
       width_changed_ = true;
     buffer_width_ = info.dwSize.X;
-    rows_ = window_rows;
-    columns_ = window_columns;
+    rows_ = win_rows;
+    columns_ = win_cols;
     settling_ = true;
     settle_until_ = std::chrono::steady_clock::now() + kSettleDelay;
     return;
@@ -591,45 +403,89 @@ void Bar::paint() {
       layout_lost_ = true;
     }
     painted_ = false;
+    ensure_room(1);
   }
 
+  bool reflowed = false;
   if (layout_lost_) {
     layout_lost_ = false;
     recover_anchor();
+    reflowed = true;
+  }
+
+  if (!bar_visible()) {
+    painted_ = false;
+    return;
   }
 
   if (!pending_.empty())
     flush_pending();
 
-  Layout laid = layout();
-  if (!laid.valid)
-    return;
+  const auto room_now = [&]() -> std::size_t {
+    return columns_ > static_cast<std::size_t>(anchor_.column)
+               ? columns_ - static_cast<std::size_t>(anchor_.column)
+               : 0;
+  };
 
-  if (painted_ && painted_bar_top_ == laid.bar_top &&
-      painted_bar_rows_ == laid.bar_rows && painted_input_ == input_text_ &&
-      painted_cursor_ == input_cursor_bytes_ &&
-      painted_status_ == status_text_ && painted_compact_ == compact_) {
+  Layout laid =
+      layout_text(input_text_, input_cursor_bytes_, room_now(), columns_);
+  ensure_room(laid.rows.size());
+  laid = layout_text(input_text_, input_cursor_bytes_, room_now(), columns_);
+
+  const int status_row = anchor_.row + static_cast<int>(laid.rows.size());
+
+  const bool echo_changed = !painted_ || painted_input_ != input_text_ ||
+                            painted_cursor_ != input_cursor_bytes_;
+  const bool status_changed = !painted_ || painted_status_ != status_text_ ||
+                              painted_status_row_ != status_row;
+  if (painted_ && !echo_changed && !status_changed)
     return;
-  }
 
   hide_cursor();
-  erase_bar();
-  ensure_output_room(laid.bar_rows);
 
-  laid = layout();
-  if (!laid.valid)
-    return;
+  for (std::size_t i = 0; i < laid.rows.size(); ++i) {
+    if (!place(Pos{anchor_.row + static_cast<int>(i),
+                   i == 0 ? anchor_.column : 0}))
+      break;
+    write_bytes(laid.rows[i]);
+    write_bytes("\x1b[K");
+  }
 
-  draw_bar(laid);
-  place_caret(laid);
+  if (status_changed) {
+    if (place(Pos{status_row, 0})) {
+      write_bytes("\x1b[7m");
+      write_bytes(status_text_);
+      write_bytes("\x1b[K\x1b[0m");
+    }
+  }
+
+  const std::size_t area_rows = laid.rows.size() + 1;
+  if (painted_ && painted_area_rows_ > area_rows) {
+    for (std::size_t r = area_rows; r < painted_area_rows_; ++r) {
+      if (!place(Pos{anchor_.row + static_cast<int>(r), 0}))
+        break;
+      write_bytes("\x1b[K");
+    }
+  }
+
+  if (reflowed) {
+    for (std::size_t r = area_rows; r < area_rows + 3; ++r) {
+      if (!place(Pos{anchor_.row + static_cast<int>(r), 0}))
+        break;
+      write_bytes("\x1b[K");
+    }
+  }
+
+  place(Pos{anchor_.row + static_cast<int>(laid.caret_row),
+            static_cast<int>(laid.caret_column)});
+  show_cursor();
 
   painted_ = true;
   painted_input_ = input_text_;
   painted_cursor_ = input_cursor_bytes_;
   painted_status_ = status_text_;
-  painted_compact_ = compact_;
-  painted_bar_top_ = laid.bar_top;
-  painted_bar_rows_ = laid.bar_rows;
+  painted_status_row_ = status_row;
+  painted_area_rows_ = area_rows;
 }
 
 } // namespace linedit
