@@ -17,7 +17,7 @@ constexpr std::size_t kMinRows = 4;
 constexpr std::size_t kMinColumns = 12;
 constexpr std::size_t kMaxPending = 64u << 20;
 constexpr std::size_t kMaxInputRows = 12;
-constexpr std::size_t kPromptColumns = 2;
+constexpr std::size_t kPromptColumns = 2; // "> "
 constexpr auto kSettleDelay = std::chrono::milliseconds(200);
 
 void raw_write(HANDLE h, std::string_view bytes) {
@@ -93,7 +93,6 @@ void Bar::close() noexcept {
     return;
   if (!pending_.empty())
     flush_pending();
-  erase_marker();
   erase_bar();
   active_ = false;
   place(anchor_);
@@ -305,44 +304,6 @@ void Bar::draw_bar(const Layout &laid) {
   write_bytes("\x1b[K\x1b[0m");
 }
 
-void Bar::draw_marker(const Layout &laid) {
-  marker_row_ = -1;
-  marker_col_ = -1;
-  if (compact_)
-    return;
-
-  HANDLE h = static_cast<HANDLE>(output_);
-  CONSOLE_SCREEN_BUFFER_INFO info{};
-  if (!GetConsoleScreenBufferInfo(h, &info))
-    return;
-
-  const int row = anchor_.row;
-  if (row < info.srWindow.Top || row > laid.bar_top)
-    return;
-
-  const int width = info.srWindow.Right - info.srWindow.Left + 1;
-  int column = anchor_.column;
-  if (column < 0)
-    column = 0;
-  if (column >= width)
-    column = width - 1;
-
-  if (!place(Pos{row, column}))
-    return;
-  write_bytes("\x1b[0m\x1b[1m\xe2\x96\x8f\x1b[0m");
-  marker_row_ = row;
-  marker_col_ = column;
-}
-
-void Bar::erase_marker() {
-  if (marker_row_ < 0)
-    return;
-  if (place(Pos{marker_row_, marker_col_}))
-    write_bytes("\x1b[0m \x1b[0m");
-  marker_row_ = -1;
-  marker_col_ = -1;
-}
-
 void Bar::place_caret(const Layout &laid) {
   if (compact_ || laid.input_rows == 0) {
     hide_cursor();
@@ -413,8 +374,6 @@ void Bar::recover_anchor() {
 
   int last = -1;
   for (int i = 0; i < static_cast<int>(read); ++i) {
-    if (row == marker_row_ && i == marker_col_)
-      continue;
     if (cells[i] != L' ' && cells[i] != L'\0')
       last = i;
   }
@@ -492,8 +451,6 @@ void Bar::flush_pending() {
   write_bytes(pending_);
   pending_.clear();
   painted_ = false;
-  marker_row_ = -1;
-  marker_col_ = -1;
 
   Pos after{};
   if (cursor_now(after))
@@ -522,8 +479,6 @@ void Bar::write_output(std::string_view data) {
   place(anchor_);
   write_bytes(data);
   painted_ = false;
-  marker_row_ = -1;
-  marker_col_ = -1;
 
   Pos after{};
   if (cursor_now(after))
@@ -542,8 +497,6 @@ void Bar::set_status(std::string_view text) { status_text_.assign(text); }
 void Bar::set_compact(bool compact) {
   if (compact_ == compact)
     return;
-  if (compact)
-    erase_marker();
   compact_ = compact;
   painted_ = false;
   if (active_ && !settling())
@@ -583,8 +536,6 @@ void Bar::commit_text(std::string_view text) {
   write_bytes(text);
   if (text.back() != '\n')
     write_bytes("\r\n");
-  marker_row_ = -1;
-  marker_col_ = -1;
 
   Pos after{};
   if (cursor_now(after))
@@ -654,24 +605,10 @@ void Bar::paint() {
   if (!laid.valid)
     return;
 
-  int want_marker_row = -1;
-  int want_marker_col = -1;
-  if (!compact_ && anchor_.row >= info.srWindow.Top &&
-      anchor_.row <= laid.bar_top) {
-    want_marker_row = anchor_.row;
-    want_marker_col = anchor_.column;
-    const int width = static_cast<int>(window_columns);
-    if (want_marker_col < 0)
-      want_marker_col = 0;
-    if (want_marker_col >= width)
-      want_marker_col = width - 1;
-  }
-
   if (painted_ && painted_bar_top_ == laid.bar_top &&
       painted_bar_rows_ == laid.bar_rows && painted_input_ == input_text_ &&
       painted_cursor_ == input_cursor_bytes_ &&
-      painted_status_ == status_text_ && painted_compact_ == compact_ &&
-      marker_row_ == want_marker_row && marker_col_ == want_marker_col) {
+      painted_status_ == status_text_ && painted_compact_ == compact_) {
     return;
   }
 
@@ -684,7 +621,6 @@ void Bar::paint() {
     return;
 
   draw_bar(laid);
-  draw_marker(laid);
   place_caret(laid);
 
   painted_ = true;
