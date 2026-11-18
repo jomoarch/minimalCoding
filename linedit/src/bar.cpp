@@ -176,8 +176,12 @@ bool Bar::input_visible() const {
   CONSOLE_SCREEN_BUFFER_INFO info{};
   if (!GetConsoleScreenBufferInfo(static_cast<HANDLE>(output_), &info))
     return true;
+  const std::size_t room =
+      columns_ > static_cast<std::size_t>(anchor_.column)
+          ? columns_ - static_cast<std::size_t>(anchor_.column)
+          : 0;
   const Layout laid =
-      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+      layout_text(input_text_, input_cursor_bytes_, room, columns_);
   const int last = anchor_.row + static_cast<int>(laid.rows.size()) - 1;
   return anchor_.row >= info.srWindow.Top && last <= info.srWindow.Bottom;
 }
@@ -191,8 +195,12 @@ void Bar::reveal_input() {
   if (!GetConsoleScreenBufferInfo(h, &info))
     return;
 
+  const std::size_t room =
+      columns_ > static_cast<std::size_t>(anchor_.column)
+          ? columns_ - static_cast<std::size_t>(anchor_.column)
+          : 0;
   const Layout laid =
-      layout_text(input_text_, input_cursor_bytes_, columns_, columns_);
+      layout_text(input_text_, input_cursor_bytes_, room, columns_);
   const int area = static_cast<int>(laid.rows.size());
   if (area <= 0)
     return;
@@ -476,8 +484,10 @@ void Bar::paint() {
     }
   }
 
-  place(Pos{anchor_.row + static_cast<int>(laid.caret_row),
-            static_cast<int>(laid.caret_column)});
+  const int caret_column =
+      laid.caret_row == 0 ? anchor_.column + static_cast<int>(laid.caret_column)
+                          : static_cast<int>(laid.caret_column);
+  place(Pos{anchor_.row + static_cast<int>(laid.caret_row), caret_column});
   show_cursor();
 
   painted_ = true;
