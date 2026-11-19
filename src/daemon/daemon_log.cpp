@@ -1,4 +1,5 @@
 #include "daemon/daemon_log.hpp"
+#include "base/color.hpp"
 
 #include <windows.h>
 
@@ -42,9 +43,23 @@ void DaemonLog::open(const std::filesystem::path &file) {
 }
 
 void DaemonLog::write(std::string_view message) {
-  const std::string line = "[" + timestamp() + "] " + std::string(message);
+  const std::string stamp = timestamp();
+  const std::string line = "[" + stamp + "] " + std::string(message);
 
-  std::fputs(line.c_str(), stdout);
+  std::string shown;
+  shown.reserve(line.size() + 16);
+  if (color::enabled()) {
+    shown += "\x1b[37m[";
+    shown += color::green(stamp);
+    shown += "\x1b[37m] ";
+  } else {
+    shown += '[';
+    shown += stamp;
+    shown += "] ";
+  }
+  shown.append(message.data(), message.size());
+
+  std::fputs(shown.c_str(), stdout);
   std::fputc('\n', stdout);
   std::fflush(stdout);
 
