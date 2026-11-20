@@ -6,7 +6,6 @@
 
 #include <cstddef>
 #include <filesystem>
-#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -49,8 +48,6 @@ run_all(const AppConfig &cfg, const std::vector<BatchCase> &cases,
         const std::filesystem::path &exe, std::size_t threads);
 [[nodiscard]] BatchVerdict verdict_of(const BatchUnit &unit);
 const char *verdict_name(BatchVerdict verdict);
-std::size_t print_results(const std::vector<BatchUnit> &units,
-                          std::ostream &os);
 [[nodiscard]] bool save_outputs(const AppConfig &cfg,
                                 const std::vector<BatchUnit> &units,
                                 std::filesystem::path &folder,

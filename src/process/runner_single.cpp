@@ -537,19 +537,21 @@ std::thread start_stdin_pump(const SingleRunOption &opts, PipeSet &pipes,
   }
 
   if (pipes.in_write.valid()) {
-    std::size_t left = opts.input_text.size();
-    const char *p = opts.input_text.data();
-    while (left > 0) {
-      DWORD written = 0;
-      const DWORD chunk =
-          static_cast<DWORD>(std::min<std::size_t>(left, 64 * 1024));
-      if (!WriteFile(pipes.in_write.get(), p, chunk, &written, nullptr) ||
-          written == 0)
-        break;
-      p += written;
-      left -= written;
-    }
-    pipes.in_write.reset();
+    return std::thread([&]() {
+      std::size_t left = opts.input_text.size();
+      const char *p = opts.input_text.data();
+      while (left > 0 && !stop.load(std::memory_order_relaxed)) {
+        DWORD written = 0;
+        const DWORD chunk =
+            static_cast<DWORD>(std::min<std::size_t>(left, 64 * 1024));
+        if (!WriteFile(pipes.in_write.get(), p, chunk, &written, nullptr) ||
+            written == 0)
+          break;
+        p += written;
+        left -= written;
+      }
+      pipes.in_write.reset();
+    });
   }
   return {};
 }
@@ -558,44 +560,49 @@ bool wait_for_child(const SingleRunOption &opts, HANDLE process, HANDLE job,
                     std::chrono::steady_clock::time_point started) {
   const bool has_cpu = opts.time_limit_ms.count() > 0;
   const bool has_wall = opts.wall_limit_ms.count() > 0;
-  if (!has_cpu && !has_wall) {
+  const bool has_tick = static_cast<bool>(opts.on_tick);
+  if (!has_cpu && !has_wall && !has_tick) {
     WaitForSingleObject(process, INFINITE);
     return false;
   }
 
-  const DWORD check_interval = 200;
+  const DWORD check_interval = has_tick ? 100 : 200;
   while (true) {
     const DWORD ret = WaitForSingleObject(process, check_interval);
     if (ret == WAIT_OBJECT_0)
       return false;
 
-    if (has_wall) {
-      const auto wall = std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - started);
-      if (wall > opts.wall_limit_ms) {
-        TerminateJobObject(job, 1);
-        WaitForSingleObject(process, 5000);
-        return true;
+    unsigned long long cpu_ms = 0;
+    if (has_cpu || has_tick) {
+      FILETIME creation, exit, kernel, user;
+      if (GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
+        ULARGE_INTEGER k, u;
+        k.LowPart = kernel.dwLowDateTime;
+        k.HighPart = kernel.dwHighDateTime;
+        u.LowPart = user.dwLowDateTime;
+        u.HighPart = user.dwHighDateTime;
+        cpu_ms = (k.QuadPart + u.QuadPart) / 10000ULL;
       }
     }
 
-    if (!has_cpu)
-      continue;
+    const auto wall = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started);
 
-    FILETIME creation, exit, kernel, user;
-    if (GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
-      ULARGE_INTEGER k, u;
-      k.LowPart = kernel.dwLowDateTime;
-      k.HighPart = kernel.dwHighDateTime;
-      u.LowPart = user.dwLowDateTime;
-      u.HighPart = user.dwHighDateTime;
-      unsigned long long cpu_ms = (k.QuadPart + u.QuadPart) / 10000ULL;
-      if (cpu_ms >
-          static_cast<unsigned long long>(opts.time_limit_ms.count())) {
-        TerminateJobObject(job, 1);
-        WaitForSingleObject(process, 5000);
-        return true;
-      }
+    if (has_tick)
+      opts.on_tick(std::chrono::milliseconds(static_cast<long long>(cpu_ms)),
+                   wall);
+
+    if (has_wall && wall > opts.wall_limit_ms) {
+      TerminateJobObject(job, 1);
+      WaitForSingleObject(process, 5000);
+      return true;
+    }
+
+    if (has_cpu &&
+        cpu_ms > static_cast<unsigned long long>(opts.time_limit_ms.count())) {
+      TerminateJobObject(job, 1);
+      WaitForSingleObject(process, 5000);
+      return true;
     }
   }
   return false;
@@ -651,6 +658,14 @@ void finalize_run(const SingleRunOption &opts, PipeSet &pipes,
 
   fill_accounting(out.result, process, job, started, opts.memory_limit_bytes,
                   time_out);
+
+  if (opts.time_limit_ms.count() > 0 &&
+      out.result.cpu_time > opts.time_limit_ms &&
+      out.result.status != RunnerStatus::MemoryLimitExceeded &&
+      out.result.status != RunnerStatus::SystemError) {
+    out.result.status = RunnerStatus::TimeLimitExceeded;
+    out.result.message = "Time limit exceeded";
+  }
 }
 
 } // namespace

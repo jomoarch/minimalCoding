@@ -71,14 +71,13 @@ cmake --build build --config Release
 批量模式挂在 `cg_t` 上：按 `Ctrl+Alt+B` 后 `cg_t` 用 `--job b` 启动一次批量任务，
 先弹出选择文件夹的窗口；选中测试用例目录后：
 
-- 目录里的 `*.in` 是测试点，按数字自然序（`2.in` 在 `10.in` 前面）；
 - 每个点优先用 `<name>.ans` 作为期望答案，没有则用 `<name>.out`；程序输出与它比较，
   不同记 `WA`，没有期望答案记 `NA`；
 - 前面的信息输出和 `cg_s` 一致：`[source]`、`[build]`、`[io] input <- <目录>`；
-  后面是旧 `cg_b` 那种结果表（`AC` / `WA` / `TLE` / `MLE` / `RE` / `SE` / `NA`，
-  外加 wall、cpu、内存和消息），最后是 `N / M accepted`；
+- 只给结果染色：`AC` 绿、`WA` 红、`RE` 粉，`TLE` / `MLE` / `NA` / `SE` 默认色；
+- 非控制台（管道、重定向）下不原地刷新，跑完按同样格式打印最终表；
 - 跑完询问是否记录输出；选 `y` 会在 `[batch].output` 下创建 `<YYYYMMDD_HHMMSS>/`，
-  每个点写一个 `<name>.out`（原始输出，不染色）。
+  每个点写一个 `<name>.out`。
 
 不想弹窗时可以直接指定目录：
 
@@ -130,7 +129,7 @@ cg_t --stop
 | `[compiler].force_rebuild` | `true` 时每次运行都重新编译，默认 `false`                                                                                        |
 | `[inject].enabled`         | 是否注入 `probe.h`（默认 `true`）；关掉就不需要头文件                                                                            |
 | `[inject].header`          | 要注入的头文件；缺省按 `base`、配置文件目录、`.exe` 目录依次找 `include/inject/probe.h`，找不到再找同名目录下的 `inject/probe.h` |
-| `[runner].time_limit_ms`   | CPU 时间上限；单文件/批量另有 `2×上限 + 1s` 的墙钟兜底，sleep/卡死也会被杀；不写则两者都不限                                       |
+| `[runner].time_limit_ms`   | CPU 时间上限；单文件/批量另有 `3×上限 + 2s` 的墙钟兜底                                                                           |
 | `[runner].memory_limit_mb` | 内存上限；`0` 表示不限                                                                                                           |
 | `[io].single_input`        | `cg_s` 的输入文件                                                                                                                |
 | `[io].single_output`       | 程序输出落盘的位置                                                                                                               |

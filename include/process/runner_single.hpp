@@ -35,6 +35,9 @@ struct SingleRunOption {
   std::function<void(const char *data, std::size_t n, bool is_stderr)>
       on_output;
   std::function<void(void *job, void *process)> on_started;
+  std::function<void(std::chrono::milliseconds cpu,
+                     std::chrono::milliseconds wall)>
+      on_tick;
 };
 
 struct SingleRunResult {
@@ -54,7 +57,7 @@ struct SingleRunResult {
 wall_limit_for(std::chrono::milliseconds cpu) {
   if (cpu.count() <= 0)
     return std::chrono::milliseconds(0);
-  return cpu * 2 + std::chrono::milliseconds(1000);
+  return cpu * 3 + std::chrono::milliseconds(2000);
 }
 
 } // namespace coding

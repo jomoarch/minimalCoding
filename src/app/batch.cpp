@@ -9,9 +9,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string_view>
 #include <thread>
@@ -129,31 +132,302 @@ std::string format_memory(std::size_t bytes) {
   return oss.str();
 }
 
-void print_row(std::ostream &os, std::string_view line, BatchVerdict verdict) {
-  using color::Code;
-  switch (verdict) {
-  case BatchVerdict::Accepted:
-    os << color::paint(os, line, {Code::Bold, Code::Green});
-    break;
-  case BatchVerdict::WrongAnswer:
-    os << color::paint(os, line, {Code::Bold, Code::Red});
-    break;
-  case BatchVerdict::TimeLimitExceeded:
-  case BatchVerdict::MemoryLimitExceeded:
-    os << color::paint(os, line, {Code::BgWhite, Code::Black});
-    break;
-  case BatchVerdict::RuntimeError:
-    os << color::paint(os, line, {Code::Bold, Code::Magenta});
-    break;
-  case BatchVerdict::SystemError:
-    os << color::paint(os, line, {Code::Bold, Code::BrightMagenta});
-    break;
-  case BatchVerdict::NoAnswer:
-    os << color::paint(os, line, {Code::BrightBlack});
-    break;
+std::string truncate_to(std::string_view text_in, std::size_t width) {
+  std::string out;
+  std::size_t used = 0;
+  for (std::size_t i = 0; i < text_in.size();) {
+    const text::Codepoint cp = text::decode_utf8(text_in, i);
+    const text::CharWidth cw = text::measure(text_in, i);
+    if (used + cw.columns > width)
+      break;
+    out.append(text_in.substr(i, cp.length));
+    used += cw.columns;
+    i += cp.length;
   }
-  os << '\n';
+  return out;
 }
+
+class BatchDisplay {
+public:
+  BatchDisplay(const std::vector<BatchCase> &cases,
+               std::chrono::milliseconds limit)
+      : limit_(limit) {
+    rows_.resize(cases.size());
+    for (std::size_t i = 0; i < cases.size(); ++i)
+      rows_[i].name = cases[i].name;
+    if (limit_.count() > 0) {
+      digits_ = std::to_string(limit_.count()).size();
+      used_w_ = digits_ + 1;
+      time_w_ = used_w_ + 3 + digits_ + 3;
+    }
+    for (const Row &row : rows_)
+      name_max_ = std::max(name_max_, text::display_width(row.name));
+    name_w_ = name_max_;
+    probe_console();
+    compute_widths();
+  }
+
+  ~BatchDisplay() { stop(); }
+
+  void start() {
+    if (started_)
+      return;
+    started_ = true;
+    if (!live_)
+      return;
+
+    std::lock_guard<std::mutex> lk(mu_);
+    std::cout << "\x1b[?25l" << std::flush;
+    render_locked();
+    render_ = std::thread([this]() {
+      while (!stop_.load(std::memory_order_relaxed)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (stop_.load(std::memory_order_relaxed))
+          break;
+        std::lock_guard<std::mutex> lk(mu_);
+        ++phase_;
+        refresh_geometry();
+        render_locked();
+      }
+    });
+  }
+
+  void mark_started(std::size_t i) {
+    if (i >= rows_.size())
+      return;
+    std::lock_guard<std::mutex> lk(mu_);
+    rows_[i].started = true;
+  }
+
+  void tick(std::size_t i, std::chrono::milliseconds cpu) {
+    if (i >= rows_.size())
+      return;
+    std::lock_guard<std::mutex> lk(mu_);
+    rows_[i].started = true;
+    rows_[i].cpu = cpu;
+  }
+
+  void finish(std::size_t i, std::chrono::milliseconds cpu, std::size_t mem,
+              BatchVerdict verdict) {
+    if (i >= rows_.size())
+      return;
+    std::lock_guard<std::mutex> lk(mu_);
+    rows_[i].started = true;
+    rows_[i].done = true;
+    rows_[i].cpu = cpu;
+    rows_[i].mem = mem;
+    rows_[i].verdict = verdict;
+  }
+
+  void stop() {
+    if (stop_.exchange(true))
+      return;
+    if (render_.joinable())
+      render_.join();
+
+    std::lock_guard<std::mutex> lk(mu_);
+    if (!started_)
+      return;
+    if (live_) {
+      refresh_geometry();
+      render_locked();
+      std::cout << "\x1b[?25h" << std::flush;
+    } else {
+      print_static_locked();
+    }
+  }
+
+private:
+  struct Row {
+    std::string name;
+    std::chrono::milliseconds cpu{0};
+    std::size_t mem{0};
+    BatchVerdict verdict{BatchVerdict::NoAnswer};
+    bool started{false};
+    bool done{false};
+  };
+
+  void probe_console() {
+    out_ = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out_ == nullptr || out_ == INVALID_HANDLE_VALUE)
+      return;
+
+    DWORD mode = 0;
+    if (!GetConsoleMode(out_, &mode))
+      return;
+    if (!(mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) &&
+        !SetConsoleMode(out_, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
+      return;
+
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (!GetConsoleScreenBufferInfo(out_, &info))
+      return;
+    const int w = info.srWindow.Right - info.srWindow.Left + 1;
+    const int h = info.srWindow.Bottom - info.srWindow.Top + 1;
+    if (w > 0)
+      term_w_ = static_cast<std::size_t>(w);
+    if (h > 0)
+      term_h_ = static_cast<std::size_t>(h);
+    live_ = rows_.size() + 1 <= term_h_;
+  }
+
+  void refresh_geometry() {
+    if (out_ == nullptr || out_ == INVALID_HANDLE_VALUE)
+      return;
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    if (!GetConsoleScreenBufferInfo(out_, &info))
+      return;
+    const int w = info.srWindow.Right - info.srWindow.Left + 1;
+    const int h = info.srWindow.Bottom - info.srWindow.Top + 1;
+    if (w > 0)
+      term_w_ = static_cast<std::size_t>(w);
+    if (h > 0)
+      term_h_ = static_cast<std::size_t>(h);
+    compute_widths();
+  }
+
+  void compute_widths() {
+    const std::size_t time_part = time_w_ > 0 ? time_w_ + 1 : 0;
+    const std::size_t overhead = 7 + time_part + mem_w_ + res_w_;
+    std::size_t name = name_max_;
+    auto room = [&](std::size_t n) {
+      const std::size_t fixed = n + overhead;
+      return term_w_ > fixed ? term_w_ - fixed : 0;
+    };
+    std::size_t avail = room(name);
+    while (avail < 4 && name > 1) {
+      --name;
+      avail = room(name);
+    }
+    name_w_ = name;
+    bar_w_ = std::max<std::size_t>(4, avail > 0 ? avail - 1 : 0);
+  }
+
+  std::string bar_for(const Row &row) const {
+    std::string bar(bar_w_, ' ');
+    if (!row.started)
+      return bar;
+
+    if (limit_.count() > 0) {
+      const auto limit = static_cast<unsigned long long>(limit_.count());
+      auto cpu = static_cast<unsigned long long>(
+          std::max<long long>(0, row.cpu.count()));
+      unsigned long long filled = bar_w_;
+      if (cpu < limit)
+        filled = (cpu * bar_w_ + limit / 2) / limit;
+      if (filled > bar_w_)
+        filled = bar_w_;
+      for (std::size_t i = 0; i < filled; ++i)
+        bar[i] = '#';
+      return bar;
+    }
+
+    if (row.done)
+      return bar;
+
+    const std::size_t block = std::max<std::size_t>(1, bar_w_ / 2);
+    const std::size_t span = bar_w_ > block ? bar_w_ - block : 0;
+    std::size_t pos = 0;
+    if (span > 0) {
+      const std::size_t t = static_cast<std::size_t>(phase_ % (2 * span));
+      pos = t <= span ? t : 2 * span - t;
+    }
+    for (std::size_t k = 0; k < block && pos + k < bar_w_; ++k)
+      bar[pos + k] = '#';
+    return bar;
+  }
+
+  std::string line_for(const Row &row) const {
+    std::string line;
+    line += text::pad_right(truncate_to(row.name, name_w_), name_w_);
+    line += " [";
+    line += bar_for(row);
+    line += ']';
+
+    if (time_w_ > 0) {
+      line += ' ';
+      if (row.started) {
+        line += text::pad_left(std::to_string(row.cpu.count()), used_w_);
+        line += " / ";
+        line += text::pad_left(std::to_string(limit_.count()), digits_);
+        line += " ms";
+      } else {
+        line += std::string(time_w_, ' ');
+      }
+    }
+
+    line += "  ";
+    line += row.done ? text::pad_left(format_memory(row.mem), mem_w_)
+                     : std::string(mem_w_, ' ');
+    line += "  ";
+
+    if (row.done) {
+      std::string token = text::pad_left(verdict_name(row.verdict), res_w_);
+      switch (row.verdict) {
+      case BatchVerdict::Accepted:
+        token = color::paint(std::cout, token, {color::Code::Green});
+        break;
+      case BatchVerdict::WrongAnswer:
+        token = color::paint(std::cout, token, {color::Code::Red});
+        break;
+      case BatchVerdict::RuntimeError:
+        token = color::paint(std::cout, token, {color::Code::BrightMagenta});
+        break;
+      default:
+        break;
+      }
+      line += token;
+    } else {
+      line += std::string(res_w_, ' ');
+    }
+    return line;
+  }
+
+  void render_locked() {
+    std::string frame;
+    frame.reserve(rows_.size() * (term_w_ + 16));
+    if (rows_printed_ > 0)
+      frame += "\x1b[" + std::to_string(rows_printed_) + "A";
+    for (const Row &row : rows_) {
+      frame += '\r';
+      frame += line_for(row);
+      frame += "\x1b[K\n";
+    }
+    std::cout.write(frame.data(), static_cast<std::streamsize>(frame.size()));
+    std::cout.flush();
+    rows_printed_ = rows_.size();
+  }
+
+  void print_static_locked() {
+    for (const Row &row : rows_) {
+      const std::string line = line_for(row);
+      std::cout.write(line.data(), static_cast<std::streamsize>(line.size()));
+      std::cout << '\n';
+    }
+    std::cout.flush();
+  }
+
+  std::vector<Row> rows_;
+  std::chrono::milliseconds limit_{0};
+  std::size_t digits_{0};
+  std::size_t used_w_{0};
+  std::size_t time_w_{0};
+  std::size_t name_max_{0};
+  std::size_t name_w_{0};
+  std::size_t bar_w_{0};
+  const std::size_t mem_w_{9};
+  const std::size_t res_w_{3};
+  std::size_t term_w_{80};
+  std::size_t term_h_{25};
+  HANDLE out_{nullptr};
+  bool live_{false};
+  bool started_{false};
+  std::mutex mu_;
+  std::thread render_;
+  std::atomic<bool> stop_{false};
+  unsigned long long phase_{0};
+  std::size_t rows_printed_{0};
+};
 
 } // namespace
 
@@ -229,6 +503,9 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
   if (n == 0)
     return units;
 
+  BatchDisplay display(cases, cfg.time_limit);
+  display.start();
+
   const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
   const std::size_t cap = threads == 0 ? 1 : threads;
   const std::size_t concurrency =
@@ -256,9 +533,16 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
       opt.colorize_output = false;
       opt.tagged_stream = false;
       opt.merge_stderr = cfg.merge_stderr == 1;
-      opt.on_started = [](void *process, void *) {
+      opt.on_started = [&display, i](void *process, void *) {
+        display.mark_started(i);
         report_program_started(process);
       };
+      if (cfg.time_limit.count() > 0) {
+        opt.on_tick = [&display, i](std::chrono::milliseconds cpu,
+                                    std::chrono::milliseconds) {
+          display.tick(i, cpu);
+        };
+      }
 
       SingleRunResult run = run_single(opt);
       unit.result = run.result;
@@ -268,6 +552,9 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
         const std::string expected = read_file(cases[i].expected);
         unit.accepted = same_output(unit.captured, expected);
       }
+
+      display.finish(i, unit.result.cpu_time, unit.result.memory_bytes,
+                     verdict_of(unit));
     }
   };
 
@@ -277,6 +564,8 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
     workers.emplace_back(worker);
   for (std::thread &w : workers)
     w.join();
+
+  display.stop();
   return units;
 }
 
@@ -316,67 +605,6 @@ const char *verdict_name(BatchVerdict verdict) {
     return "SE";
   }
   return "?";
-}
-
-std::size_t print_results(const std::vector<BatchUnit> &units,
-                          std::ostream &os) {
-  if (units.empty())
-    return 0;
-
-  struct Row {
-    std::string name;
-    std::string status;
-    std::string wall;
-    std::string cpu;
-    std::string mem;
-    std::string message;
-    BatchVerdict verdict;
-  };
-
-  std::vector<Row> rows;
-  rows.reserve(units.size());
-  std::size_t w_name = 0, w_status = 0, w_wall = 0, w_cpu = 0, w_mem = 0;
-  std::size_t accepted = 0;
-
-  for (const BatchUnit &unit : units) {
-    Row row;
-    row.name = unit.name;
-    row.verdict = verdict_of(unit);
-    row.status = verdict_name(row.verdict);
-    row.wall = std::to_string(unit.result.wall_time.count()) + " ms";
-    row.cpu = std::to_string(unit.result.cpu_time.count()) + " ms";
-    row.mem = format_memory(unit.result.memory_bytes);
-    row.message = unit.result.message;
-
-    if (row.verdict == BatchVerdict::Accepted)
-      ++accepted;
-
-    w_name = std::max(w_name, text::display_width(row.name));
-    w_status = std::max(w_status, text::display_width(row.status));
-    w_wall = std::max(w_wall, text::display_width(row.wall));
-    w_cpu = std::max(w_cpu, text::display_width(row.cpu));
-    w_mem = std::max(w_mem, text::display_width(row.mem));
-    rows.push_back(std::move(row));
-  }
-
-  for (const Row &row : rows) {
-    std::string line = text::pad_right(row.name, w_name);
-    line += "  ";
-    line += text::pad_left(row.status, w_status);
-    line += "  ";
-    line += text::pad_left(row.wall, w_wall);
-    line += "  ";
-    line += text::pad_left(row.cpu, w_cpu);
-    line += "  ";
-    line += text::pad_left(row.mem, w_mem);
-    if (!row.message.empty()) {
-      line += "  ";
-      line += row.message;
-    }
-    print_row(os, line, row.verdict);
-  }
-
-  return accepted;
 }
 
 bool save_outputs(const AppConfig &cfg, const std::vector<BatchUnit> &units,

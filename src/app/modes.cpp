@@ -553,7 +553,11 @@ ModeOutcome run_batch_file(const AppConfig &cfg,
   const std::vector<app::BatchUnit> units =
       app::run_all(cfg, cases, paths.exe, cfg.batch_thread_max);
 
-  const std::size_t accepted = app::print_results(units, std::cout);
+  std::size_t accepted = 0;
+  for (const app::BatchUnit &unit : units) {
+    if (app::verdict_of(unit) == app::BatchVerdict::Accepted)
+      ++accepted;
+  }
   std::cout << "\n" << accepted << " / " << units.size() << " accepted\n";
 
   if (cfg.batch_output.empty()) {
