@@ -147,6 +147,20 @@ std::string truncate_to(std::string_view text_in, std::size_t width) {
   return out;
 }
 
+std::string paint_verdict(std::ostream &os, std::string_view text_in,
+                          BatchVerdict verdict) {
+  switch (verdict) {
+  case BatchVerdict::Accepted:
+    return color::paint(os, text_in, {color::Code::BrightGreen});
+  case BatchVerdict::WrongAnswer:
+    return color::paint(os, text_in, {color::Code::Red});
+  case BatchVerdict::RuntimeError:
+    return color::paint(os, text_in, {color::Code::BrightMagenta});
+  default:
+    return std::string(text_in);
+  }
+}
+
 class BatchDisplay {
 public:
   BatchDisplay(const std::vector<BatchCase> &cases,
@@ -339,7 +353,11 @@ private:
 
   std::string line_for(const Row &row) const {
     std::string line;
-    line += text::pad_right(truncate_to(row.name, name_w_), name_w_);
+    std::string name_field =
+        text::pad_right(truncate_to(row.name, name_w_), name_w_);
+    if (row.done)
+      name_field = paint_verdict(std::cout, name_field, row.verdict);
+    line += name_field;
     line += " [";
     line += bar_for(row);
     line += ']';
@@ -362,21 +380,9 @@ private:
     line += "  ";
 
     if (row.done) {
-      std::string token = text::pad_left(verdict_name(row.verdict), res_w_);
-      switch (row.verdict) {
-      case BatchVerdict::Accepted:
-        token = color::paint(std::cout, token, {color::Code::Green});
-        break;
-      case BatchVerdict::WrongAnswer:
-        token = color::paint(std::cout, token, {color::Code::Red});
-        break;
-      case BatchVerdict::RuntimeError:
-        token = color::paint(std::cout, token, {color::Code::BrightMagenta});
-        break;
-      default:
-        break;
-      }
-      line += token;
+      line += paint_verdict(std::cout,
+                            text::pad_left(verdict_name(row.verdict), res_w_),
+                            row.verdict);
     } else {
       line += std::string(res_w_, ' ');
     }

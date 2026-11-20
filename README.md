@@ -74,7 +74,8 @@ cmake --build build --config Release
 - 每个点优先用 `<name>.ans` 作为期望答案，没有则用 `<name>.out`；程序输出与它比较，
   不同记 `WA`，没有期望答案记 `NA`；
 - 前面的信息输出和 `cg_s` 一致：`[source]`、`[build]`、`[io] input <- <目录>`；
-- 只给结果染色：`AC` 绿、`WA` 红、`RE` 粉，`TLE` / `MLE` / `NA` / `SE` 默认色；
+- 用例名和结果按同一判定染色：`AC` 绿、`WA` 红、`RE` 粉，`TLE` / `MLE` / `NA` / `SE`
+  默认色；条、时间、内存不着色；
 - 非控制台（管道、重定向）下不原地刷新，跑完按同样格式打印最终表；
 - 跑完询问是否记录输出；选 `y` 会在 `[batch].output` 下创建 `<YYYYMMDD_HHMMSS>/`，
   每个点写一个 `<name>.out`。
