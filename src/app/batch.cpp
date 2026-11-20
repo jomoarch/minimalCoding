@@ -132,6 +132,12 @@ std::string format_memory(std::size_t bytes) {
   return oss.str();
 }
 
+std::filesystem::path batch_cache_file(const AppConfig &cfg) {
+  const std::filesystem::path dir =
+      cfg.coding_dir.empty() ? cfg.base / ".coding" : cfg.coding_dir;
+  return dir / "last_batch_dir.txt";
+}
+
 std::string truncate_to(std::string_view text_in, std::size_t width) {
   std::string out;
   std::size_t used = 0;
@@ -498,6 +504,48 @@ bool list_cases(const std::filesystem::path &dir, std::vector<BatchCase> &cases,
     cases.push_back(std::move(c));
   }
   return true;
+}
+
+std::filesystem::path initial_batch_dir(const AppConfig &cfg) {
+  std::ifstream in(batch_cache_file(cfg), std::ios::binary);
+  if (in) {
+    std::string line;
+    std::getline(in, line);
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' ||
+                             line.back() == ' ' || line.back() == '\t'))
+      line.pop_back();
+    if (!line.empty()) {
+      std::error_code ec;
+      std::filesystem::path cached;
+      try {
+        cached = std::filesystem::u8path(line);
+      } catch (...) {
+        return cfg.base;
+      }
+      if (std::filesystem::is_directory(cached, ec))
+        return cached;
+    }
+  }
+  return cfg.base;
+}
+
+void remember_batch_dir(const AppConfig &cfg,
+                        const std::filesystem::path &dir) {
+  const std::filesystem::path file = batch_cache_file(cfg);
+  std::error_code ec;
+  if (!file.parent_path().empty())
+    std::filesystem::create_directories(file.parent_path(), ec);
+
+  std::ofstream out(file, std::ios::binary | std::ios::trunc);
+  if (!out)
+    return;
+  std::string utf8;
+  try {
+    utf8 = dir.u8string();
+  } catch (...) {
+    return;
+  }
+  out.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
 }
 
 std::vector<BatchUnit> run_all(const AppConfig &cfg,

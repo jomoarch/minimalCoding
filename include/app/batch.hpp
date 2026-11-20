@@ -40,6 +40,8 @@ enum class BatchVerdict {
 [[nodiscard]] bool pick_folder(const std::wstring &title,
                                const std::filesystem::path &initial,
                                std::filesystem::path &out, std::string &error);
+[[nodiscard]] std::filesystem::path initial_batch_dir(const AppConfig &cfg);
+void remember_batch_dir(const AppConfig &cfg, const std::filesystem::path &dir);
 [[nodiscard]] bool list_cases(const std::filesystem::path &dir,
                               std::vector<BatchCase> &cases,
                               std::string &error);

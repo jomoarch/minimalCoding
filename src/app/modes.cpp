@@ -504,7 +504,8 @@ ModeOutcome run_batch_file(const AppConfig &cfg,
 
   std::filesystem::path dir = given_dir;
   if (dir.empty()) {
-    if (!app::pick_folder(L"Choose Test Folder", cfg.base, dir, error)) {
+    if (!app::pick_folder(L"Choose Test Folder", app::initial_batch_dir(cfg),
+                          dir, error)) {
       if (!error.empty()) {
         std::cerr << color::err("[batch] ", error) << "\n";
         out.code = 2;
@@ -513,6 +514,12 @@ ModeOutcome run_batch_file(const AppConfig &cfg,
       return out;
     }
   }
+
+  std::error_code dir_ec;
+  const std::filesystem::path absolute_dir =
+      std::filesystem::absolute(dir, dir_ec);
+  if (!dir_ec)
+    dir = absolute_dir;
 
   BuildPaths paths;
   PickedSource pick;
@@ -531,6 +538,9 @@ ModeOutcome run_batch_file(const AppConfig &cfg,
     out.wait_key = true;
     return out;
   }
+
+  app::remember_batch_dir(cfg, dir);
+
   if (cases.empty()) {
     std::cerr << color::err("[batch] no .in files found in ", dir) << "\n";
     out.code = 2;
