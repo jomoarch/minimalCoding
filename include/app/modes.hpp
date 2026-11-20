@@ -15,6 +15,8 @@ struct ModeOutcome {
 
 ModeOutcome run_interactive(const AppConfig &cfg);
 ModeOutcome run_single_file(const AppConfig &cfg);
+ModeOutcome run_batch_file(const AppConfig &cfg,
+                           const std::filesystem::path &dir);
 
 } // namespace coding
 

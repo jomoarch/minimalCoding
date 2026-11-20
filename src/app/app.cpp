@@ -6,6 +6,8 @@
 
 #include <windows.h>
 
+#include <objbase.h>
+
 #include <iostream>
 
 namespace coding {
@@ -53,6 +55,20 @@ ModeOutcome run_interactive() {
   if (!load(cfg))
     return ModeOutcome{2, false, false, false};
   return settle(run_interactive(cfg));
+}
+
+ModeOutcome run_batch(const std::filesystem::path &dir) {
+  use_utf8_console();
+  color::install();
+  AppConfig cfg;
+  if (!load(cfg))
+    return ModeOutcome{2, false, false, false};
+
+  const HRESULT hr = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const ModeOutcome outcome = run_batch_file(cfg, dir);
+  if (SUCCEEDED(hr))
+    ::CoUninitialize();
+  return settle(outcome);
 }
 
 } // namespace app

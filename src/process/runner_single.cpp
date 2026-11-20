@@ -386,21 +386,47 @@ bool spawn_child(const SingleRunOption &opts, PipeSet &pipes, HANDLE job,
     cwd = workdir.c_str();
   }
 
-  STARTUPINFOW si{};
-  si.cb = sizeof(si);
-  si.dwFlags = STARTF_USESTDHANDLES;
-  si.hStdInput = pipes.child_stdin;
-  si.hStdOutput = pipes.out_write.get();
-  si.hStdError = pipes.err_write.get();
+  STARTUPINFOEXW si{};
+  si.StartupInfo.cb = sizeof(si);
+  si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+  si.StartupInfo.hStdInput = pipes.child_stdin;
+  si.StartupInfo.hStdOutput = pipes.out_write.get();
+  si.StartupInfo.hStdError = pipes.err_write.get();
+
+  HANDLE inherited[3] = {pipes.child_stdin, pipes.out_write.get(),
+                         pipes.err_write.get()};
+  SIZE_T attr_size = 0;
+  ::InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_size);
+  std::vector<char> attr_storage(attr_size);
+  auto *attr =
+      reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_storage.data());
+  if (!::InitializeProcThreadAttributeList(attr, 1, 0, &attr_size)) {
+    out.result.message =
+        "InitializeProcThreadAttributeList failed: " + win::last_error_string();
+    return false;
+  }
+  if (!::UpdateProcThreadAttribute(attr, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                   inherited, sizeof(inherited), nullptr,
+                                   nullptr)) {
+    ::DeleteProcThreadAttributeList(attr);
+    out.result.message =
+        "UpdateProcThreadAttribute failed: " + win::last_error_string();
+    return false;
+  }
+  si.lpAttributeList = attr;
 
   PROCESS_INFORMATION pi{};
-  DWORD create_flags = CREATE_SUSPENDED | CREATE_NO_WINDOW;
+  const DWORD create_flags =
+      CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT;
 
   ::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX |
                  SEM_NOOPENFILEERRORBOX);
 
-  if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE,
-                      create_flags, nullptr, cwd, &si, &pi)) {
+  const BOOL spawned =
+      ::CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, TRUE,
+                       create_flags, nullptr, cwd, &si.StartupInfo, &pi);
+  ::DeleteProcThreadAttributeList(attr);
+  if (!spawned) {
     out.result.message = "CreateProcessW failed: " + win::last_error_string();
     return false;
   }
@@ -528,16 +554,34 @@ std::thread start_stdin_pump(const SingleRunOption &opts, PipeSet &pipes,
   return {};
 }
 
-bool wait_for_child(const SingleRunOption &opts, HANDLE process, HANDLE job) {
-  if (opts.time_limit_ms.count() == 0) {
+bool wait_for_child(const SingleRunOption &opts, HANDLE process, HANDLE job,
+                    std::chrono::steady_clock::time_point started) {
+  const bool has_cpu = opts.time_limit_ms.count() > 0;
+  const bool has_wall = opts.wall_limit_ms.count() > 0;
+  if (!has_cpu && !has_wall) {
     WaitForSingleObject(process, INFINITE);
     return false;
   }
+
   const DWORD check_interval = 200;
   while (true) {
-    DWORD ret = WaitForSingleObject(process, check_interval);
+    const DWORD ret = WaitForSingleObject(process, check_interval);
     if (ret == WAIT_OBJECT_0)
       return false;
+
+    if (has_wall) {
+      const auto wall = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - started);
+      if (wall > opts.wall_limit_ms) {
+        TerminateJobObject(job, 1);
+        WaitForSingleObject(process, 5000);
+        return true;
+      }
+    }
+
+    if (!has_cpu)
+      continue;
+
     FILETIME creation, exit, kernel, user;
     if (GetProcessTimes(process, &creation, &exit, &kernel, &user)) {
       ULARGE_INTEGER k, u;
@@ -645,7 +689,8 @@ SingleRunResult run_single(const SingleRunOption &opts) {
   std::atomic<bool> stdin_stop{false};
   std::thread stdin_pump = start_stdin_pump(opts, pipes, stdin_stop);
 
-  const bool time_out = wait_for_child(opts, child.process.get(), hJob.get());
+  const bool time_out =
+      wait_for_child(opts, child.process.get(), hJob.get(), child.started);
 
   finalize_run(opts, pipes, ctx, stdin_pump, stdin_stop, child.process.get(),
                hJob.get(), child.started, time_out, out);

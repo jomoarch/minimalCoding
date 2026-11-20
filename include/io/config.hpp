@@ -44,12 +44,17 @@ struct AppConfig {
   bool ask_save_output{true};
   bool ask_copy_output{false};
 
+  // batch
+  std::filesystem::path batch_output;
+  std::size_t batch_thread_max{4};
+
   // build
   bool force_rebuild{false};
 
   // daemon
   std::string hotkey_interactive{"Ctrl+Alt+I"};
   std::string hotkey_single{"Ctrl+Alt+S"};
+  std::string hotkey_batch{"Ctrl+Alt+B"};
   std::string hotkey_quit{"Ctrl+Alt+Q"};
 };
 

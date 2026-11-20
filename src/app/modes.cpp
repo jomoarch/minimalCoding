@@ -1,5 +1,6 @@
 #include "app/modes.hpp"
 
+#include "app/batch.hpp"
 #include "app/builder.hpp"
 #include "app/clipboard.hpp"
 #include "app/interactive_ui.hpp"
@@ -493,6 +494,85 @@ ModeOutcome run_single_file(const AppConfig &cfg) {
   out.code = finished.code;
   out.saved_input = finished.saved_input;
   out.saved_output = finished.saved_output;
+  return out;
+}
+
+ModeOutcome run_batch_file(const AppConfig &cfg,
+                           const std::filesystem::path &given_dir) {
+  ModeOutcome out;
+  std::string error;
+
+  std::filesystem::path dir = given_dir;
+  if (dir.empty()) {
+    if (!app::pick_folder(L"Choose Test Folder", cfg.base, dir, error)) {
+      if (!error.empty()) {
+        std::cerr << color::err("[batch] ", error) << "\n";
+        out.code = 2;
+        out.wait_key = true;
+      }
+      return out;
+    }
+  }
+
+  BuildPaths paths;
+  PickedSource pick;
+  if (!pick_target(cfg, paths, pick, error)) {
+    std::cerr << color::err("[source] ", error) << "\n";
+    out.code = 2;
+    out.wait_key = true;
+    return out;
+  }
+  print_source(cfg, pick);
+
+  std::vector<app::BatchCase> cases;
+  if (!app::list_cases(dir, cases, error)) {
+    std::cerr << color::err("[batch] ", error) << "\n";
+    out.code = 2;
+    out.wait_key = true;
+    return out;
+  }
+  if (cases.empty()) {
+    std::cerr << color::err("[batch] no .in files found in ", dir) << "\n";
+    out.code = 2;
+    out.wait_key = true;
+    return out;
+  }
+
+  const BuildResult built = build_step(cfg, paths, BuildTarget::Normal);
+  if (!built) {
+    out.code = 2;
+    return out;
+  }
+  print_build_line(cfg, paths.exe, built);
+
+  std::cout << color::ok("[io] input <- ", show_relative(cfg.base, dir), " (",
+                         cases.size(), cases.size() == 1 ? " case" : " cases",
+                         ")")
+            << "\n\n";
+
+  const std::vector<app::BatchUnit> units =
+      app::run_all(cfg, cases, paths.exe, cfg.batch_thread_max);
+
+  const std::size_t accepted = app::print_results(units, std::cout);
+  std::cout << "\n" << accepted << " / " << units.size() << " accepted\n";
+
+  if (cfg.batch_output.empty()) {
+    std::cout << "[save] [batch].output is not configured, outputs not saved\n";
+  } else if (prompt::ask_yes_no("[save] Save " + std::to_string(units.size()) +
+                                " .out file(s) to " +
+                                show_path(cfg.batch_output) + "?")) {
+    std::filesystem::path folder;
+    if (!app::save_outputs(cfg, units, folder, error)) {
+      std::cerr << color::err("[save] ", error) << "\n";
+    } else {
+      out.saved_output = true;
+      std::cout << color::ok("[save] saved ", units.size(), " .out file(s) -> ",
+                             show_relative(cfg.base, folder))
+                << "\n";
+    }
+  }
+
+  out.code = accepted == units.size() ? 0 : 1;
   return out;
 }
 

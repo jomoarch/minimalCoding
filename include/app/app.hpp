@@ -7,6 +7,7 @@ namespace app {
 
 ModeOutcome run_single();
 ModeOutcome run_interactive();
+ModeOutcome run_batch(const std::filesystem::path &dir = {});
 
 int run_daemon(int argc, char **argv);
 

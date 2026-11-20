@@ -34,6 +34,8 @@ set(CORE_SOURCES
   src/app/prompt.cpp
   src/app/stale_exe.cpp
   src/app/interactive_ui.cpp
+  src/app/batch.cpp
+  src/app/folder_picker.cpp
   src/app/clipboard.cpp
   src/app/program_hook.cpp
   src/app/pch.cpp
@@ -46,7 +48,7 @@ target_include_directories(coding_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include/third_party
 )
 
-target_link_libraries(coding_core PUBLIC bcrypt)
+target_link_libraries(coding_core PUBLIC bcrypt ole32 uuid shell32)
 
 add_subdirectory(linedit)
 target_link_libraries(coding_core PUBLIC linedit_core)

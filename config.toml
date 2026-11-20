@@ -26,7 +26,12 @@ ask_save_input = true
 ask_save_output = true
 ask_copy_output = false
 
+[batch]
+output = "test/batch"
+thread_max = 4
+
 [daemon]
 interactive = "Ctrl+Alt+I"
 single = "Ctrl+Alt+S"
+batch = "Ctrl+Alt+B"
 quit = "Ctrl+Alt+Q"

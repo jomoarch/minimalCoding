@@ -15,6 +15,7 @@ struct SingleRunOption {
   std::filesystem::path work_dir;
 
   std::chrono::milliseconds time_limit_ms{0};
+  std::chrono::milliseconds wall_limit_ms{0};
   std::size_t memory_limit_bytes{0};
 
   bool stdin_from_console{false};
@@ -48,6 +49,13 @@ struct SingleRunResult {
 };
 
 [[nodiscard]] SingleRunResult run_single(const SingleRunOption &opts);
+
+[[nodiscard]] inline std::chrono::milliseconds
+wall_limit_for(std::chrono::milliseconds cpu) {
+  if (cpu.count() <= 0)
+    return std::chrono::milliseconds(0);
+  return cpu * 2 + std::chrono::milliseconds(1000);
+}
 
 } // namespace coding
 

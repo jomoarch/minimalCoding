@@ -77,7 +77,7 @@ LaunchResult JobLauncher::launch(Job job, unsigned long long *pid,
   reap(job);
 
   std::wstring command = L"\"" + exe_ + L"\" --job ";
-  command += job == Job::Interactive ? L"i" : L"s";
+  command += job == Job::Interactive ? L"i" : job == Job::Single ? L"s" : L"b";
 
   std::vector<wchar_t> buffer(command.begin(), command.end());
   buffer.push_back(L'\0');

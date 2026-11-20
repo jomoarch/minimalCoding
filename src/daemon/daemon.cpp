@@ -35,15 +35,20 @@ namespace {
 
 constexpr int kHotkeyInteractive = 1;
 constexpr int kHotkeySingle = 2;
-constexpr int kHotkeyQuit = 3;
+constexpr int kHotkeyBatch = 3;
+constexpr int kHotkeyQuit = 4;
 
 constexpr UINT_PTR kTagJobI = 1;
 constexpr UINT_PTR kTagJobS = 2;
-constexpr UINT_PTR kTagSignalI = 3;
-constexpr UINT_PTR kTagSignalS = 4;
+constexpr UINT_PTR kTagJobB = 3;
+constexpr UINT_PTR kTagSignalI = 4;
+constexpr UINT_PTR kTagSignalS = 5;
+constexpr UINT_PTR kTagSignalB = 6;
 
 const char *describe(Job job) {
-  return job == Job::Interactive ? "interactive" : "single";
+  return job == Job::Interactive ? "interactive"
+         : job == Job::Single    ? "single"
+                                 : "batch";
 }
 
 void usage() {
@@ -55,12 +60,15 @@ void usage() {
          "config.toml)\n"
          "  cg_t --status      show whether it is running and which keys work\n"
          "  cg_t --stop        make the running daemon exit\n"
-         "  cg_t --job i|s     internal: run one interactive / single task\n"
+         "  cg_t --job i|s|b   internal: run one interactive / single / batch "
+         "task\n"
+         "  cg_t --job b --dir <dir>   batch without the folder picker\n"
          "  cg_t --help\n"
          "\n"
          "hotkeys (see [daemon] in config.toml):\n"
          "  interactive  default Ctrl+Alt+I\n"
          "  single       default Ctrl+Alt+S\n"
+         "  batch        default Ctrl+Alt+B\n"
          "  quit         default Ctrl+Alt+Q   (empty value disables a key)\n"
          "\n"
          "process log goes to stdout and <base>/.coding/daemon.log\n";
@@ -78,6 +86,8 @@ bool resolve_slots(const AppConfig &cfg, std::vector<HotkeySlot> &slots,
                              {}});
   slots.push_back(HotkeySlot{
       kHotkeySingle, "single", cfg.hotkey_single, {}, false, false, {}});
+  slots.push_back(HotkeySlot{
+      kHotkeyBatch, "batch", cfg.hotkey_batch, {}, false, false, {}});
   slots.push_back(
       HotkeySlot{kHotkeyQuit, "quit", cfg.hotkey_quit, {}, false, false, {}});
 
@@ -106,7 +116,7 @@ bool resolve_slots(const AppConfig &cfg, std::vector<HotkeySlot> &slots,
   return true;
 }
 
-int run_job(Job job) {
+int run_job(Job job, const std::filesystem::path &dir = {}) {
   SlotPublisher publisher;
   publisher.open(job);
   publisher.publish_job(
@@ -116,8 +126,9 @@ int run_job(Job job) {
   set_program_started_hook(
       [&publisher](unsigned long pid) { publisher.publish_program(pid); });
 
-  const ModeOutcome outcome =
-      job == Job::Interactive ? run_interactive() : run_single();
+  const ModeOutcome outcome = job == Job::Interactive ? run_interactive()
+                              : job == Job::Single    ? run_single()
+                                                      : run_batch(dir);
 
   publisher.publish_done(static_cast<unsigned long>(outcome.code),
                          outcome.saved_input, outcome.saved_output);
@@ -224,7 +235,7 @@ int run_service() {
   log.write("daemon: started (pid " + std::to_string(::GetCurrentProcessId()) +
             ")");
 
-  unsigned long long logged_program[kJobCount]{0, 0};
+  unsigned long long logged_program[kJobCount]{0, 0, 0};
 
   const auto focus_running = [&](Job job) {
     const SlotReport report = board.read(job);
@@ -240,7 +251,9 @@ int run_service() {
       return;
     }
 
-    const Job job = id == kHotkeySingle ? Job::Single : Job::Interactive;
+    const Job job = id == kHotkeySingle  ? Job::Single
+                    : id == kHotkeyBatch ? Job::Batch
+                                         : Job::Interactive;
 
     if (launcher.busy(job)) {
       focus_running(job);
@@ -270,15 +283,18 @@ int run_service() {
     std::vector<std::pair<UINT_PTR, HANDLE>> items;
     items.emplace_back(kTagJobI, launcher.handle(Job::Interactive));
     items.emplace_back(kTagJobS, launcher.handle(Job::Single));
+    items.emplace_back(kTagJobB, launcher.handle(Job::Batch));
     items.emplace_back(kTagSignalI, board.signal(Job::Interactive));
     items.emplace_back(kTagSignalS, board.signal(Job::Single));
+    items.emplace_back(kTagSignalB, board.signal(Job::Batch));
     return items;
   };
 
   const auto on_wake = [&](UINT_PTR tag) {
-    const bool is_job = tag == kTagJobI || tag == kTagJobS;
-    const Job job = (tag == kTagJobI || tag == kTagSignalI) ? Job::Interactive
-                                                            : Job::Single;
+    const bool is_job = tag == kTagJobI || tag == kTagJobS || tag == kTagJobB;
+    const Job job = (tag == kTagJobI || tag == kTagSignalI)   ? Job::Interactive
+                    : (tag == kTagJobS || tag == kTagSignalS) ? Job::Single
+                                                              : Job::Batch;
     const int index = static_cast<int>(job);
 
     const SlotReport report = board.read(job);
@@ -378,7 +394,7 @@ int run_daemon(int argc, char **argv) {
 
     if (arg == "--job") {
       if (i + 1 >= argc) {
-        std::cerr << "[cg_t] --job needs i or s\n";
+        std::cerr << "[cg_t] --job needs i, s or b\n";
         return 2;
       }
       const std::string_view mode = argv[++i];
@@ -386,6 +402,18 @@ int run_daemon(int argc, char **argv) {
         return run_job(Job::Interactive);
       if (mode == "s")
         return run_job(Job::Single);
+      if (mode == "b") {
+        std::filesystem::path dir;
+        if (i + 1 < argc && std::string_view(argv[i + 1]) == "--dir") {
+          if (i + 2 >= argc) {
+            std::cerr << "[cg_t] --dir needs a path\n";
+            return 2;
+          }
+          dir = argv[i + 2];
+          i += 2;
+        }
+        return run_job(Job::Batch, dir);
+      }
       std::cerr << "[cg_t] unknown job \"" << std::string(mode) << "\"\n";
       return 2;
     }

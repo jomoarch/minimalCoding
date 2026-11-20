@@ -12,9 +12,9 @@
 namespace coding {
 namespace app {
 
-enum class Job { Interactive = 0, Single = 1 };
+enum class Job { Interactive = 0, Single = 1, Batch = 2 };
 
-inline constexpr int kJobCount = 2;
+inline constexpr int kJobCount = 3;
 
 enum class LaunchResult {
   Started,
@@ -48,8 +48,8 @@ public:
 private:
   std::wstring exe_;
   HandleGuard job_;
-  HANDLE jobs_[kJobCount]{nullptr, nullptr};
-  unsigned long long pids_[kJobCount]{0, 0};
+  HANDLE jobs_[kJobCount]{nullptr, nullptr, nullptr};
+  unsigned long long pids_[kJobCount]{0, 0, 0};
 };
 
 } // namespace app

@@ -11,7 +11,7 @@ namespace {
 
 std::wstring slot_object(Job job, const wchar_t *suffix) {
   std::wstring name = L"Local\\minimalCoding.cg_t.slot.";
-  name += job == Job::Interactive ? L"i." : L"s.";
+  name += job == Job::Interactive ? L"i." : job == Job::Batch ? L"b." : L"s.";
   name += suffix;
   return name;
 }

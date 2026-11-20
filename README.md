@@ -24,11 +24,11 @@
 
 ## 可执行文件一览
 
-| 工具   | 用途                                      |
-| ------ | ----------------------------------------- |
-| `cg_i` | 编译一次后直接再控制台交互运行            |
-| `cg_s` | 编译一次，用 `[io].single_input` 作为输入 |
-| `cg_t` | 后台常驻，按全局热键触发上面两者          |
+| 工具   | 用途                                         |
+| ------ | -------------------------------------------- |
+| `cg_i` | 编译一次后直接再控制台交互运行               |
+| `cg_s` | 编译一次，用 `[io].single_input` 作为输入    |
+| `cg_t` | 后台常驻，按全局热键触发交互 / 单文件 / 批量 |
 
 ## 交互模式的编辑器
 
@@ -66,6 +66,28 @@ cmake --build build --config Release
 | `Ctrl`+`Backspace` | 按**单词**退格                                  |
 | `Ctrl`+`Delete`    | 按**单词**删除                                  |
 
+## 批量模式
+
+批量模式挂在 `cg_t` 上：按 `Ctrl+Alt+B` 后 `cg_t` 用 `--job b` 启动一次批量任务，
+先弹出选择文件夹的窗口；选中测试用例目录后：
+
+- 目录里的 `*.in` 是测试点，按数字自然序（`2.in` 在 `10.in` 前面）；
+- 每个点优先用 `<name>.ans` 作为期望答案，没有则用 `<name>.out`；程序输出与它比较，
+  不同记 `WA`，没有期望答案记 `NA`；
+- 前面的信息输出和 `cg_s` 一致：`[source]`、`[build]`、`[io] input <- <目录>`；
+  后面是旧 `cg_b` 那种结果表（`AC` / `WA` / `TLE` / `MLE` / `RE` / `SE` / `NA`，
+  外加 wall、cpu、内存和消息），最后是 `N / M accepted`；
+- 跑完询问是否记录输出；选 `y` 会在 `[batch].output` 下创建 `<YYYYMMDD_HHMMSS>/`，
+  每个点写一个 `<name>.out`（原始输出，不染色）。
+
+不想弹窗时可以直接指定目录：
+
+```sh
+cg_t --job b --dir path\to\cases
+```
+
+`[batch].thread_max` 控制并发测试点数，同时受 CPU 核心数限制。
+
 ## 热键守护进程：cg_t
 
 `cg_t` 常驻后台，按全局热键触发一次 `cg_i` / `cg_s` 的运行。
@@ -78,7 +100,7 @@ cg_t --status
 cg_t --stop
 ```
 
-默认热键：`Ctrl+Alt+I` 交互模式、`Ctrl+Alt+S` 单文件模式、`Ctrl+Alt+Q` 退出。
+默认热键：`Ctrl+Alt+I` 交互模式、`Ctrl+Alt+S` 单文件模式、`Ctrl+Alt+B` 批量模式、`Ctrl+Alt+Q` 退出。
 
 ### 退出
 
@@ -108,7 +130,7 @@ cg_t --stop
 | `[compiler].force_rebuild` | `true` 时每次运行都重新编译，默认 `false`                                                                                        |
 | `[inject].enabled`         | 是否注入 `probe.h`（默认 `true`）；关掉就不需要头文件                                                                            |
 | `[inject].header`          | 要注入的头文件；缺省按 `base`、配置文件目录、`.exe` 目录依次找 `include/inject/probe.h`，找不到再找同名目录下的 `inject/probe.h` |
-| `[runner].time_limit_ms`   | CPU 时间上限；不写就永远不杀超时程序                                                                                             |
+| `[runner].time_limit_ms`   | CPU 时间上限；单文件/批量另有 `2×上限 + 1s` 的墙钟兜底，sleep/卡死也会被杀；不写则两者都不限                                       |
 | `[runner].memory_limit_mb` | 内存上限；`0` 表示不限                                                                                                           |
 | `[io].single_input`        | `cg_s` 的输入文件                                                                                                                |
 | `[io].single_output`       | 程序输出落盘的位置                                                                                                               |
@@ -119,8 +141,11 @@ cg_t --stop
 | `[io].ask_save_input`      | 跑完是否询问保存输入；关掉不问（默认`true`）                                                                                     |
 | `[io].ask_save_output`     | 跑完是否询问保存输出；关掉不问（默认`true`）                                                                                     |
 | `[io].ask_copy_output`     | 跑完是否询问把输出复制到粘贴板（默认 `false`）；复制的内容与写文件那份一致，stderr 是否包含同样看 `merge_stderr`                 |
+| `[batch].output`           | 批量输出的根目录；保存时在它下面建 `<YYYYMMDD_HHMMSS>/`。不写则跑完不保存（会提示未配置）                                        |
+| `[batch].thread_max`       | 批量并发测试点数，默认 `4`，同时受 CPU 核心数限制                                                                                |
 | `[daemon].interactive`     | `cg_t` 触发交互模式的热键，默认 `Ctrl+Alt+I`；留空关掉                                                                           |
 | `[daemon].single`          | `cg_t` 触发单文件模式的热键，默认 `Ctrl+Alt+S`；留空关掉                                                                         |
+| `[daemon].batch`           | `cg_t` 触发批量模式的热键，默认 `Ctrl+Alt+B`；留空关掉                                                                           |
 | `[daemon].quit`            | `cg_t` 退出热键，默认 `Ctrl+Alt+Q`；留空关掉                                                                                     |
 
 可执行文件、运行目录与缓存表都由程序在 `<base>/.coding/` 下生成，**不能**再用配置指定；旧配置里的 `[compiler].output`、`[compiler].output_probe`、`[runner].work_dir` 会被忽略。

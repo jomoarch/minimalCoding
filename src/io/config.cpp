@@ -350,10 +350,19 @@ ConfigResult load_config(const std::filesystem::path &path) {
         [](int64_t v) { return static_cast<std::size_t>(v) * 1024; });
   });
 
+  // [batch]
+  read_section(tbl, "batch", [&](const toml::table &t) {
+    read_field(t, "output", c.batch_output);
+    read_field_as<int64_t>(t, "thread_max", c.batch_thread_max, [](int64_t v) {
+      return v > 0 ? static_cast<std::size_t>(v) : 1;
+    });
+  });
+
   // [daemon]
   read_section(tbl, "daemon", [&](const toml::table &t) {
     read_field(t, "interactive", c.hotkey_interactive);
     read_field(t, "single", c.hotkey_single);
+    read_field(t, "batch", c.hotkey_batch);
     read_field(t, "quit", c.hotkey_quit);
   });
 
@@ -369,7 +378,7 @@ ConfigResult load_config(const std::filesystem::path &path) {
   c.base = compress_path(base, false, true);
 
   resolve_all(base, c.source_path, c.single_input, c.single_output,
-              c.inject_header);
+              c.batch_output, c.inject_header);
 
   if (c.source_path.empty())
     c.source_path = c.base;
