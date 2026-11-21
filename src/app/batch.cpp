@@ -313,6 +313,10 @@ public:
     std::lock_guard<std::mutex> lk(mu_);
     if (!started_)
       return;
+    if (limit_.count() == 0) {
+      finalized_ = true;
+      compute_max_cpu();
+    }
     if (live_) {
       refresh_geometry();
       render_locked();
@@ -331,6 +335,19 @@ private:
     bool started{false};
     bool done{false};
   };
+
+  void compute_max_cpu() {
+    max_cpu_ = std::chrono::milliseconds(0);
+    for (const Row &row : rows_) {
+      if (!row.done)
+        continue;
+      if (row.verdict == BatchVerdict::Killed ||
+          row.verdict == BatchVerdict::Skipped)
+        continue;
+      if (row.cpu > max_cpu_)
+        max_cpu_ = row.cpu;
+    }
+  }
 
   void probe_console() {
     out_ = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -407,8 +424,20 @@ private:
       return bar;
     }
 
-    if (row.done)
+    if (row.done) {
+      if (!finalized_ || row.verdict == BatchVerdict::Killed ||
+          row.verdict == BatchVerdict::Skipped || max_cpu_.count() <= 0)
+        return bar;
+      const auto max_cpu = static_cast<unsigned long long>(max_cpu_.count());
+      const auto cpu = static_cast<unsigned long long>(
+          std::max<long long>(0, row.cpu.count()));
+      unsigned long long filled = (cpu * bar_w_ + max_cpu / 2) / max_cpu;
+      if (filled > bar_w_)
+        filled = bar_w_;
+      for (std::size_t i = 0; i < filled; ++i)
+        bar[i] = '#';
       return bar;
+    }
 
     const std::size_t block = std::max<std::size_t>(1, bar_w_ / 2);
     const std::size_t pos = static_cast<std::size_t>(phase_ % bar_w_);
@@ -512,6 +541,8 @@ private:
   HANDLE out_{nullptr};
   bool live_{false};
   bool started_{false};
+  bool finalized_{false};
+  std::chrono::milliseconds max_cpu_{0};
   std::mutex mu_;
   std::thread render_;
   std::atomic<bool> stop_{false};
