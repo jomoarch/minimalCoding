@@ -568,7 +568,13 @@ ModeOutcome run_batch_file(const AppConfig &cfg,
     if (app::verdict_of(unit) == app::BatchVerdict::Accepted)
       ++accepted;
   }
-  std::cout << "\n" << accepted << " / " << units.size() << " accepted\n";
+  if (accepted == units.size()) {
+    std::cout << "\n"
+              << color::ok(accepted, " / ", units.size(), " accepted") << "\n";
+  } else {
+    std::cout << "\n"
+              << color::err(accepted, " / ", units.size(), " accepted") << "\n";
+  }
 
   if (cfg.batch_output.empty()) {
     std::cout << "[save] [batch].output is not configured, outputs not saved\n";
@@ -584,6 +590,8 @@ ModeOutcome run_batch_file(const AppConfig &cfg,
                              show_relative(cfg.base, folder))
                 << "\n";
     }
+  } else {
+    std::cout << color::info("[save] skipped") << "\n";
   }
 
   out.code = accepted == units.size() ? 0 : 1;
