@@ -167,6 +167,66 @@ std::string paint_verdict(std::ostream &os, std::string_view text_in,
   }
 }
 
+struct RunningJob {
+  HANDLE job{nullptr};
+  std::atomic<bool> *killed{nullptr};
+};
+
+std::mutex g_running_mu;
+std::vector<RunningJob> g_running;
+
+BOOL WINAPI batch_ctrl_handler(DWORD type) {
+  if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT)
+    return FALSE;
+
+  std::lock_guard<std::mutex> lk(g_running_mu);
+  for (RunningJob &item : g_running) {
+    if (item.killed != nullptr)
+      item.killed->store(true);
+    if (item.job != nullptr)
+      TerminateJobObject(item.job, 1);
+  }
+  return TRUE;
+}
+
+HANDLE register_running(HANDLE job, std::atomic<bool> *killed) {
+  if (job == nullptr || job == INVALID_HANDLE_VALUE)
+    return nullptr;
+
+  HANDLE duplicate = nullptr;
+  if (!DuplicateHandle(GetCurrentProcess(), job, GetCurrentProcess(),
+                       &duplicate, JOB_OBJECT_TERMINATE, FALSE, 0))
+    return nullptr;
+
+  std::lock_guard<std::mutex> lk(g_running_mu);
+  g_running.push_back(RunningJob{duplicate, killed});
+  return duplicate;
+}
+
+void unregister_running(HANDLE duplicate) {
+  if (duplicate == nullptr)
+    return;
+  {
+    std::lock_guard<std::mutex> lk(g_running_mu);
+    for (auto it = g_running.begin(); it != g_running.end(); ++it) {
+      if (it->job == duplicate) {
+        g_running.erase(it);
+        break;
+      }
+    }
+  }
+  CloseHandle(duplicate);
+}
+
+void close_all_running() {
+  std::lock_guard<std::mutex> lk(g_running_mu);
+  for (RunningJob &item : g_running) {
+    if (item.job != nullptr)
+      CloseHandle(item.job);
+  }
+  g_running.clear();
+}
+
 class BatchDisplay {
 public:
   BatchDisplay(const std::vector<BatchCase> &cases,
@@ -178,7 +238,12 @@ public:
     if (limit_.count() > 0) {
       digits_ = std::to_string(limit_.count()).size();
       used_w_ = digits_ + 1;
+      unit_w_ = 2;
       time_w_ = used_w_ + 3 + digits_ + 3;
+    } else {
+      used_w_ = 5;
+      unit_w_ = 2;
+      time_w_ = used_w_ + 1 + unit_w_;
     }
     for (const Row &row : rows_)
       name_max_ = std::max(name_max_, text::display_width(row.name));
@@ -346,14 +411,9 @@ private:
       return bar;
 
     const std::size_t block = std::max<std::size_t>(1, bar_w_ / 2);
-    const std::size_t span = bar_w_ > block ? bar_w_ - block : 0;
-    std::size_t pos = 0;
-    if (span > 0) {
-      const std::size_t t = static_cast<std::size_t>(phase_ % (2 * span));
-      pos = t <= span ? t : 2 * span - t;
-    }
-    for (std::size_t k = 0; k < block && pos + k < bar_w_; ++k)
-      bar[pos + k] = '#';
+    const std::size_t pos = static_cast<std::size_t>(phase_ % bar_w_);
+    for (std::size_t k = 0; k < block; ++k)
+      bar[(pos + k) % bar_w_] = '#';
     return bar;
   }
 
@@ -370,13 +430,30 @@ private:
 
     if (time_w_ > 0) {
       line += ' ';
-      if (row.started) {
+      if (!row.started) {
+        line += std::string(time_w_, ' ');
+      } else if (limit_.count() > 0) {
         line += text::pad_left(std::to_string(row.cpu.count()), used_w_);
         line += " / ";
         line += text::pad_left(std::to_string(limit_.count()), digits_);
         line += " ms";
       } else {
-        line += std::string(time_w_, ' ');
+        const long long ms = std::max<long long>(0, row.cpu.count());
+        std::string number;
+        std::string unit;
+        if (ms <= 9999) {
+          number = std::to_string(ms);
+          unit = "ms";
+        } else {
+          std::ostringstream oss;
+          oss << std::fixed << std::setprecision(1)
+              << (static_cast<double>(ms) / 1000.0);
+          number = oss.str();
+          unit = "s";
+        }
+        line += text::pad_left(number, used_w_);
+        line += ' ';
+        line += text::pad_left(unit, unit_w_);
       }
     }
 
@@ -423,6 +500,7 @@ private:
   std::chrono::milliseconds limit_{0};
   std::size_t digits_{0};
   std::size_t used_w_{0};
+  std::size_t unit_w_{0};
   std::size_t time_w_{0};
   std::size_t name_max_{0};
   std::size_t name_w_{0};
@@ -560,6 +638,9 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
   BatchDisplay display(cases, cfg.time_limit);
   display.start();
 
+  close_all_running();
+  SetConsoleCtrlHandler(batch_ctrl_handler, TRUE);
+
   const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
   const std::size_t cap = threads == 0 ? 1 : threads;
   const std::size_t concurrency =
@@ -575,6 +656,10 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
       BatchUnit &unit = units[i];
       unit.name = cases[i].name;
       unit.has_answer = cases[i].has_answer;
+      unit.ran = true;
+
+      std::atomic<bool> killed{false};
+      HANDLE running_job = nullptr;
 
       SingleRunOption opt;
       opt.exe_path = exe;
@@ -587,18 +672,22 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
       opt.colorize_output = false;
       opt.tagged_stream = false;
       opt.merge_stderr = cfg.merge_stderr == 1;
-      opt.on_started = [&display, i](void *process, void *) {
+      opt.on_started = [&display, i, &killed, &running_job](void *process,
+                                                            void *job) {
         display.mark_started(i);
+        running_job = register_running(static_cast<HANDLE>(job), &killed);
         report_program_started(process);
       };
-      if (cfg.time_limit.count() > 0) {
-        opt.on_tick = [&display, i](std::chrono::milliseconds cpu,
-                                    std::chrono::milliseconds) {
-          display.tick(i, cpu);
-        };
-      }
+      opt.on_tick = [&display, i](std::chrono::milliseconds cpu,
+                                  std::chrono::milliseconds) {
+        display.tick(i, cpu);
+      };
 
       SingleRunResult run = run_single(opt);
+      if (running_job != nullptr)
+        unregister_running(running_job);
+      unit.killed = killed.load();
+
       unit.result = run.result;
       unit.captured = std::move(run.captured);
 
@@ -619,11 +708,24 @@ std::vector<BatchUnit> run_all(const AppConfig &cfg,
   for (std::thread &w : workers)
     w.join();
 
+  for (std::size_t i = 0; i < n; ++i) {
+    if (units[i].ran)
+      continue;
+    units[i].skipped = true;
+    display.finish(i, std::chrono::milliseconds(0), 0, BatchVerdict::Skipped);
+  }
+
   display.stop();
+  SetConsoleCtrlHandler(batch_ctrl_handler, FALSE);
+  close_all_running();
   return units;
 }
 
 BatchVerdict verdict_of(const BatchUnit &unit) {
+  if (unit.killed)
+    return BatchVerdict::Killed;
+  if (unit.skipped)
+    return BatchVerdict::Skipped;
   switch (unit.result.status) {
   case RunnerStatus::TimeLimitExceeded:
     return BatchVerdict::TimeLimitExceeded;
@@ -655,6 +757,10 @@ const char *verdict_name(BatchVerdict verdict) {
     return "MLE";
   case BatchVerdict::RuntimeError:
     return "RE";
+  case BatchVerdict::Killed:
+    return "KE";
+  case BatchVerdict::Skipped:
+    return "SK";
   case BatchVerdict::SystemError:
     return "SE";
   }

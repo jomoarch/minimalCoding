@@ -25,6 +25,9 @@ struct BatchUnit {
   std::string captured;
   bool has_answer{false};
   bool accepted{false};
+  bool ran{false};
+  bool killed{false};
+  bool skipped{false};
 };
 
 enum class BatchVerdict {
@@ -34,6 +37,8 @@ enum class BatchVerdict {
   TimeLimitExceeded,
   MemoryLimitExceeded,
   RuntimeError,
+  Killed,
+  Skipped,
   SystemError
 };
 
