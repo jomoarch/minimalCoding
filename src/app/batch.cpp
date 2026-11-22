@@ -135,7 +135,7 @@ std::string format_memory(std::size_t bytes) {
 std::filesystem::path batch_cache_file(const AppConfig &cfg) {
   const std::filesystem::path dir =
       cfg.coding_dir.empty() ? cfg.base / ".coding" : cfg.coding_dir;
-  return dir / "last_batch_dir.txt";
+  return dir / "last_batch_dir.cache";
 }
 
 std::string truncate_to(std::string_view text_in, std::size_t width) {
