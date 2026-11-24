@@ -64,20 +64,29 @@ bool Table::load(std::string &warning) {
     if (view.empty() || view.front() == '#')
       continue;
 
-    const std::size_t split = view.find_first_of(" \t");
-    if (split == std::string_view::npos) {
+    const std::size_t first = view.find_first_of(" \t");
+    const std::size_t second = first == std::string_view::npos
+                                   ? std::string_view::npos
+                                   : view.find_first_of(" \t", first + 1);
+    if (first == std::string_view::npos) {
+      ++skipped;
+      continue;
+    }
+    if (second == std::string_view::npos)
+      continue;
+
+    const std::string source_sha =
+        text::to_lower(text::trim(view.substr(0, first)));
+    const std::string exe_sha =
+        text::to_lower(text::trim(view.substr(first + 1, second - first - 1)));
+    const std::string key(text::trim(view.substr(second + 1)));
+    if (!is_sha256_hex(source_sha) || !is_sha256_hex(exe_sha) || key.empty() ||
+        find(key) != nullptr) {
       ++skipped;
       continue;
     }
 
-    const std::string sha = text::to_lower(view.substr(0, split));
-    const std::string name(text::trim(view.substr(split)));
-    if (!is_sha256_hex(sha) || name.empty() || find(name) != nullptr) {
-      ++skipped;
-      continue;
-    }
-
-    entries_.push_back(Entry{sha, name});
+    entries_.push_back(Entry{source_sha, exe_sha, key});
   }
 
   if (skipped != 0)
@@ -86,22 +95,23 @@ bool Table::load(std::string &warning) {
   return true;
 }
 
-const std::string *Table::find(std::string_view filename) const {
+const Entry *Table::find(std::string_view key) const {
   for (const Entry &entry : entries_) {
-    if (std::string_view(entry.filename) == filename)
-      return &entry.sha256;
+    if (std::string_view(entry.key) == key)
+      return &entry;
   }
   return nullptr;
 }
 
-void Table::touch(std::string_view filename, std::string_view sha256) {
-  const std::string name(filename);
-  entries_.erase(std::remove_if(entries_.begin(), entries_.end(),
-                                [&name](const Entry &entry) {
-                                  return entry.filename == name;
-                                }),
-                 entries_.end());
-  entries_.insert(entries_.begin(), Entry{std::string(sha256), name});
+void Table::touch(std::string_view key, std::string_view source_sha256,
+                  std::string_view exe_sha256) {
+  const std::string name(key);
+  entries_.erase(
+      std::remove_if(entries_.begin(), entries_.end(),
+                     [&name](const Entry &entry) { return entry.key == name; }),
+      entries_.end());
+  entries_.insert(entries_.begin(), Entry{std::string(source_sha256),
+                                          std::string(exe_sha256), name});
 }
 
 bool Table::save(std::string &error) const {
@@ -129,10 +139,11 @@ bool Table::save(std::string &error) const {
       error = "cannot write " + show_path(temporary);
       return false;
     }
-    file << "# coding build cache: <sha256> <path relative to base>, most "
-            "recently built first\n";
+    file << "# coding build cache: <source sha256> <exe sha256> <recipe key>, "
+            "most recently built first\n";
     for (const Entry &entry : entries_)
-      file << entry.sha256 << ' ' << entry.filename << '\n';
+      file << entry.source_sha256 << ' ' << entry.exe_sha256 << ' ' << entry.key
+           << '\n';
     file.flush();
     if (!file) {
       error = "cannot write " + show_path(temporary);

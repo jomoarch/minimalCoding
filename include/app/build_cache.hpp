@@ -10,8 +10,9 @@ namespace coding {
 namespace cache {
 
 struct Entry {
-  std::string sha256;
-  std::string filename;
+  std::string source_sha256;
+  std::string exe_sha256;
+  std::string key;
 };
 
 class Table {
@@ -22,9 +23,10 @@ public:
 
   bool load(std::string &warning);
 
-  const std::string *find(std::string_view filename) const;
+  const Entry *find(std::string_view key) const;
 
-  void touch(std::string_view filename, std::string_view sha256);
+  void touch(std::string_view key, std::string_view source_sha256,
+             std::string_view exe_sha256);
 
   bool save(std::string &error) const;
 

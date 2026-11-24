@@ -49,6 +49,40 @@ std::string cache_key_of(const BuildOption &opts) {
 
 } // namespace
 
+std::string recipe_cache_key(std::string_view base_key, bool probe,
+                             const std::vector<std::string> &args,
+                             const std::filesystem::path &inject_header) {
+  hash::Sha256 hasher;
+  hasher.write(base_key);
+  hasher.write_u64(probe ? 1 : 0);
+  hasher.write_u64(args.size());
+  for (const std::string &arg : args) {
+    hasher.write_u64(arg.size());
+    hasher.write(arg);
+  }
+  if (probe) {
+    const auto utf8 = inject_header.u8string();
+    const std::string header_path(utf8.begin(), utf8.end());
+    hasher.write_u64(header_path.size());
+    hasher.write(header_path);
+
+    std::string header_sha;
+    if (hash::file_sha256(inject_header, header_sha))
+      hasher.write(header_sha);
+    else
+      hasher.write("missing");
+  }
+
+  std::string digest = hasher.hex();
+  if (digest.empty())
+    digest = "nohash";
+
+  std::string key(base_key);
+  key += probe ? "#probe:" : "#normal:";
+  key += digest;
+  return key;
+}
+
 BuildResult ensure_built(const BuildOption &opts) {
   BuildResult r;
   r.success = false;
@@ -97,10 +131,19 @@ BuildResult ensure_built(const BuildOption &opts) {
           if (!warning.empty())
             std::cerr << color::warn("[build] ", warning, "\n");
         }
-        const std::string *cached =
+        const cache::Entry *cached =
             opts.cache_path.empty() ? nullptr : table.find(cache_key_of(opts));
-        if (cached != nullptr && *cached == sha) {
-          reason = "sha256 matches";
+        if (cached != nullptr && cached->source_sha256 == sha) {
+          std::string exe_sha;
+          if (!hash::file_sha256(opts.output_path, exe_sha)) {
+            need = true;
+            reason = "cannot hash the exe";
+          } else if (exe_sha != cached->exe_sha256) {
+            need = true;
+            reason = "exe sha256 changed";
+          } else {
+            reason = "sha256 matches";
+          }
         } else {
           need = true;
           reason = cached != nullptr ? "sha256 changed" : "no cache entry";
@@ -191,13 +234,20 @@ BuildResult ensure_built(const BuildOption &opts) {
                                show_path(opts.source_path),
                                ", the build cache was not updated\n");
     } else {
-      cache::Table table(opts.cache_path);
-      std::string warning;
-      table.load(warning);
-      table.touch(cache_key_of(opts), sha);
-      std::string error;
-      if (!table.save(error))
-        std::cerr << color::warn("[build] cache not saved: ", error, "\n");
+      std::string exe_sha;
+      if (!hash::file_sha256(opts.output_path, exe_sha)) {
+        std::cerr << color::warn("[build] cannot hash ",
+                                 show_path(opts.output_path),
+                                 ", the build cache was not updated\n");
+      } else {
+        cache::Table table(opts.cache_path);
+        std::string warning;
+        table.load(warning);
+        table.touch(cache_key_of(opts), sha, exe_sha);
+        std::string error;
+        if (!table.save(error))
+          std::cerr << color::warn("[build] cache not saved: ", error, "\n");
+      }
     }
   }
   return r;

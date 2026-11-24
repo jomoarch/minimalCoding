@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 namespace coding {
 
@@ -42,6 +43,11 @@ struct BuildResult {
 };
 
 BuildResult ensure_built(const BuildOption &opts);
+
+[[nodiscard]] std::string
+recipe_cache_key(std::string_view base_key, bool probe,
+                 const std::vector<std::string> &args,
+                 const std::filesystem::path &inject_header);
 
 } // namespace coding
 

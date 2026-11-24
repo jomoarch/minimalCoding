@@ -92,18 +92,21 @@ bool pick_target(const AppConfig &cfg, BuildPaths &paths, PickedSource &pick,
 
 BuildResult build_step(const AppConfig &cfg, const BuildPaths &paths,
                        BuildTarget target) {
+  const bool probe = target == BuildTarget::Probe && uses_probe_build(cfg);
+
   BuildOption opt;
   opt.source_path = paths.source;
   opt.output_path = target == BuildTarget::Probe ? paths.exe_probe : paths.exe;
   opt.args = cfg.args;
   opt.base = cfg.base;
   opt.cache_path = cfg.cache_path;
-  opt.cache_key = paths.key;
+  opt.cache_key =
+      recipe_cache_key(paths.key, probe, cfg.args, cfg.inject_header);
   opt.trash_dir = cfg.build_dir / ".trash";
   opt.pch_dir = cfg.coding_dir / "pch";
   opt.extra_deps.push_back(cfg.config_path);
 
-  if (target == BuildTarget::Probe && uses_probe_build(cfg)) {
+  if (probe) {
     opt.inject_header = cfg.inject_header;
     opt.extra_deps.push_back(cfg.inject_header);
   }
